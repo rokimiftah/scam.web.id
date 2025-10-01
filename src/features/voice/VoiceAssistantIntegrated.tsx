@@ -27,9 +27,21 @@ const sanitizePublicEnv = (value?: string): string | null => {
 	const trimmed = value.trim();
 	return trimmed.length > 0 && trimmed !== "undefined" && trimmed !== "null" ? trimmed : null;
 };
+const PUBLIC_VAPI_PUBLIC_KEY = (() => {
+	try {
+		return sanitizePublicEnv(process.env.PUBLIC_VAPI_PUBLIC_KEY);
+	} catch (_error) {
+		return null;
+	}
+})();
 
-const PUBLIC_VAPI_PUBLIC_KEY = sanitizePublicEnv(process.env.PUBLIC_VAPI_PUBLIC_KEY);
-const PUBLIC_VAPI_ASSISTANT_ID = sanitizePublicEnv(process.env.PUBLIC_VAPI_ASSISTANT_ID);
+const PUBLIC_VAPI_ASSISTANT_ID = (() => {
+	try {
+		return sanitizePublicEnv(process.env.PUBLIC_VAPI_ASSISTANT_ID);
+	} catch (_error) {
+		return null;
+	}
+})();
 
 const resolveVapiPublicKey = (): string | null => PUBLIC_VAPI_PUBLIC_KEY;
 
