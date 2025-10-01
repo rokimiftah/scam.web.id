@@ -16,6 +16,8 @@ jobs:
     env:
       CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ secrets.CONVEX_SELF_HOSTED_ADMIN_KEY }}
       CONVEX_SELF_HOSTED_URL: ${{ secrets.CONVEX_SELF_HOSTED_URL }}
+      PUBLIC_VAPI_PUBLIC_KEY: ${{ secrets.PUBLIC_VAPI_PUBLIC_KEY }}
+      PUBLIC_VAPI_ASSISTANT_ID: ${{ secrets.PUBLIC_VAPI_ASSISTANT_ID }}
 
     steps:
       - name: Set up SSH
