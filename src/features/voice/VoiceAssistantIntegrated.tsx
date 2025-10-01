@@ -19,41 +19,21 @@ export interface VoiceAssistantHandle {
 	isListening: boolean;
 }
 
-const resolveVapiPublicKey = (): string | null => {
-	const fromMeta =
-		import.meta.env.VITE_VAPI_PUBLIC_KEY ??
-		import.meta.env.VAPI_PUBLIC_KEY ??
-		import.meta.env.PUBLIC_VAPI_PUBLIC_KEY ??
-		undefined;
-
-	if (fromMeta) {
-		return fromMeta;
+const sanitizePublicEnv = (value?: string): string | null => {
+	if (typeof value !== "string") {
+		return null;
 	}
 
-	if (typeof process !== "undefined") {
-		return process.env.VITE_VAPI_PUBLIC_KEY ?? process.env.VAPI_PUBLIC_KEY ?? process.env.PUBLIC_VAPI_PUBLIC_KEY ?? null;
-	}
-
-	return null;
+	const trimmed = value.trim();
+	return trimmed.length > 0 && trimmed !== "undefined" && trimmed !== "null" ? trimmed : null;
 };
 
-const resolveVapiAssistantId = (): string | null => {
-	const fromMeta =
-		import.meta.env.VITE_VAPI_ASSISTANT_ID ??
-		import.meta.env.VAPI_ASSISTANT_ID ??
-		import.meta.env.PUBLIC_VAPI_ASSISTANT_ID ??
-		undefined;
+const PUBLIC_VAPI_PUBLIC_KEY = sanitizePublicEnv(process.env.PUBLIC_VAPI_PUBLIC_KEY);
+const PUBLIC_VAPI_ASSISTANT_ID = sanitizePublicEnv(process.env.PUBLIC_VAPI_ASSISTANT_ID);
 
-	if (fromMeta) {
-		return fromMeta;
-	}
+const resolveVapiPublicKey = (): string | null => PUBLIC_VAPI_PUBLIC_KEY;
 
-	if (typeof process !== "undefined") {
-		return process.env.VITE_VAPI_ASSISTANT_ID ?? process.env.VAPI_ASSISTANT_ID ?? process.env.PUBLIC_VAPI_ASSISTANT_ID ?? null;
-	}
-
-	return null;
-};
+const resolveVapiAssistantId = (): string | null => PUBLIC_VAPI_ASSISTANT_ID;
 
 const parseFunctionArgs = (rawArgs: unknown): Record<string, any> => {
 	if (!rawArgs) return {};
