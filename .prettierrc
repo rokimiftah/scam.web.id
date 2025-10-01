@@ -1,0 +1,35 @@
+{
+	"importOrder": [
+		"<TYPES>",
+		"",
+		"<BUILTIN_MODULES>",
+		"",
+		"^react(-dom)?(/.*)?$",
+		"",
+		"^(?!(?:node:)|[./]|@(?:app|entities|features|pages|shared|convex/_generated)/).+",
+		"",
+		"^@convex/_generated(/.*)?$",
+		"",
+		"^@(?:app|entities|features|pages|shared)(?!/.*\\.(?:css|scss|sass|less)$)(/.*)?$",
+		"",
+		"^(?!.*\\.(css|scss|sass|less)$)[./].*$",
+		"",
+		"^@(?:app|entities|features|pages|shared)(?:/.*)?\\.(?:css|scss|sass|less)$",
+		"",
+		"\\.(css|scss|sass|less)$"
+	],
+
+	"importOrderParserPlugins": ["typescript", "jsx", "decorators"],
+
+	"importOrderSafeSideEffects": ["^.+\\.(css|scss|sass|less)$"],
+
+	"importOrderTypeScriptVersion": "5.0.0",
+
+	"plugins": ["@ianvs/prettier-plugin-sort-imports", "prettier-plugin-tailwindcss"],
+
+	"printWidth": 130,
+
+	"tabWidth": 2,
+
+	"useTabs": true
+}

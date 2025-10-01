@@ -1,0 +1,51 @@
+/* src/shared/styles/index.css */
+
+@import "tailwind-preset-mantine";
+
+/* Critical: Set dark background immediately to prevent white flash */
+html {
+	background-color: #15151a;
+}
+
+body {
+	background-color: #15151a;
+	margin: 0;
+	padding: 0;
+}
+
+#root {
+	background-color: #15151a;
+	min-height: 100vh;
+}
+
+/* Ensure all canvases have dark background */
+canvas {
+	background-color: #15151a;
+}
+
+/* View transition styles removed - not yet widely supported */
+
+@keyframes fade-out {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+.no-scrollbar::-webkit-scrollbar {
+	display: none;
+}
+.no-scrollbar {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}

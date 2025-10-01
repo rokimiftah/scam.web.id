@@ -1,0 +1,37 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "off"
+			}
+		}
+	},
+
+	"formatter": {
+		"enabled": false
+	},
+
+	"linter": {
+		"rules": {
+			"a11y": {
+				"noStaticElementInteractions": "off",
+				"noSvgWithoutTitle": "off",
+				"useButtonType": "off",
+				"useKeyWithClickEvents": "off"
+			},
+			"complexity": {
+				"noCommaOperator": "off"
+			},
+			"recommended": true,
+			"suspicious": {
+				"noArrayIndexKey": "off",
+				"noExplicitAny": "off"
+			},
+			"style": {
+				"noNonNullAssertion": "off"
+			}
+		}
+	}
+}

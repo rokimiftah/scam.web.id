@@ -1,0 +1,55 @@
+name: GitHub Actions
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
+jobs:
+  Build-and-Deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      CONVEX_SELF_HOSTED_ADMIN_KEY: ${{ secrets.CONVEX_SELF_HOSTED_ADMIN_KEY }}
+      CONVEX_SELF_HOSTED_URL: ${{ secrets.CONVEX_SELF_HOSTED_URL }}
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 400 ~/.ssh/id_ed25519
+          ssh-keyscan ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Install, build and archive
+        run: |
+          npm install --legacy-peer-deps
+          npx convex deploy --cmd-url-env-var-name PUBLIC_CONVEX_URL --cmd "npm run build"
+          tar -czf build.tar.gz -C dist .
+
+      - name: Upload build to VPS
+        run: |
+          scp -i ~/.ssh/id_ed25519 build.tar.gz ${{secrets.SSH_USER}}@${{ secrets.SSH_HOST }}:${{ secrets.TARGET_DIRECTORY }}/build.tar.gz
+
+      - name: Deploy application on VPS
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${{secrets.SSH_USER}}@${{ secrets.SSH_HOST }} "
+            cd ${{ secrets.TARGET_DIRECTORY }}
+            ls | grep -v 'build.tar.gz' | xargs rm -rf
+            tar -xzvf build.tar.gz
+            rm -rf build.tar.gz
+            caddy reload -c /etc/caddy/Caddyfile
+            rm -rf ~/.cache ~/.local/share/zsh/chpwd-recent-dirs ~/.zsh_history ~/.z
+          "
