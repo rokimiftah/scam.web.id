@@ -2,7 +2,7 @@
 
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 
 // Get total scam count (stories + scams from comments)
 export const getTotalScamCount = query({
@@ -430,5 +430,16 @@ export const getHelpfulComments = query({
 		);
 
 		return commentsWithStories;
+	},
+});
+
+export const getScamStoriesForCountry = internalQuery({
+	args: { country: v.string() },
+	handler: async (ctx, { country }) => {
+		return ctx.db
+			.query("scamStories")
+			.withIndex("by_country", (q) => q.eq("country", country))
+			.filter((q) => q.eq(q.field("isProcessed"), true))
+			.collect();
 	},
 });

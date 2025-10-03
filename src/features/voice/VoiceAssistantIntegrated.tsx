@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import Vapi from "@vapi-ai/web";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 
 import { api } from "../../../convex/_generated/api";
 
@@ -11,6 +11,7 @@ interface VoiceAssistantProps {
 	isAuthenticated: boolean;
 	onLocationQuery?: (country: string) => void;
 	onVoiceSessionEnd?: () => void;
+	onSessionActiveChange?: (active: boolean) => void;
 }
 
 export interface VoiceAssistantHandle {
@@ -19,33 +20,8 @@ export interface VoiceAssistantHandle {
 	isListening: boolean;
 }
 
-const sanitizePublicEnv = (value?: string): string | null => {
-	if (typeof value !== "string") {
-		return null;
-	}
-
-	const trimmed = value.trim();
-	return trimmed.length > 0 && trimmed !== "undefined" && trimmed !== "null" ? trimmed : null;
-};
-const PUBLIC_VAPI_PUBLIC_KEY = (() => {
-	try {
-		return sanitizePublicEnv(process.env.PUBLIC_VAPI_PUBLIC_KEY);
-	} catch (_error) {
-		return null;
-	}
-})();
-
-const PUBLIC_VAPI_ASSISTANT_ID = (() => {
-	try {
-		return sanitizePublicEnv(process.env.PUBLIC_VAPI_ASSISTANT_ID);
-	} catch (_error) {
-		return null;
-	}
-})();
-
-const resolveVapiPublicKey = (): string | null => PUBLIC_VAPI_PUBLIC_KEY;
-
-const resolveVapiAssistantId = (): string | null => PUBLIC_VAPI_ASSISTANT_ID;
+const PUBLIC_VAPI_PUBLIC_KEY = process.env.PUBLIC_VAPI_PUBLIC_KEY;
+const PUBLIC_VAPI_ASSISTANT_ID = process.env.PUBLIC_VAPI_ASSISTANT_ID;
 
 const parseFunctionArgs = (rawArgs: unknown): Record<string, any> => {
 	if (!rawArgs) return {};
@@ -64,7 +40,7 @@ const parseFunctionArgs = (rawArgs: unknown): Record<string, any> => {
 };
 
 const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistantProps>(
-	({ isAuthenticated, onLocationQuery, onVoiceSessionEnd }, ref) => {
+	({ isAuthenticated, onLocationQuery, onVoiceSessionEnd, onSessionActiveChange }, ref) => {
 		const [isListening, setIsListening] = useState(false);
 		const [isConnecting, setIsConnecting] = useState(false);
 		const [transcript, setTranscript] = useState("");
@@ -77,11 +53,14 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 		const locationStats = useQuery(api.scams.getLocationStats, {});
 		const trendingScams = useQuery(api.scams.getTrendingScams, {});
 		const currentUser = useQuery(api.users.getCurrentUser);
+		const sendPreventionTipsEmailAction = useAction(api.aiAnalyzer.sendPreventionTips);
 
 		const onLocationQueryRef = useRef(onLocationQuery);
 		const trendingScamsRef = useRef(trendingScams);
 		const getHighRiskLocationsRef = useRef<() => string[]>(() => []);
 		const onVoiceSessionEndRef = useRef(onVoiceSessionEnd);
+		const onSessionActiveChangeRef = useRef(onSessionActiveChange);
+		const sendPreventionTipsEmailActionRef = useRef(sendPreventionTipsEmailAction);
 
 		useEffect(() => {
 			onLocationQueryRef.current = onLocationQuery;
@@ -94,6 +73,14 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 		useEffect(() => {
 			onVoiceSessionEndRef.current = onVoiceSessionEnd;
 		}, [onVoiceSessionEnd]);
+
+		useEffect(() => {
+			onSessionActiveChangeRef.current = onSessionActiveChange;
+		}, [onSessionActiveChange]);
+
+		useEffect(() => {
+			sendPreventionTipsEmailActionRef.current = sendPreventionTipsEmailAction;
+		}, [sendPreventionTipsEmailAction]);
 
 		const travelerName = useMemo(() => {
 			if (!currentUser) return null;
@@ -246,6 +233,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 			const latestOnLocationQuery = onLocationQueryRef.current;
 			const latestHighRiskFn = getHighRiskLocationsRef.current;
 			const latestTrendingScams = trendingScamsRef.current;
+			const latestSendTipsAction = sendPreventionTipsEmailActionRef.current;
 
 			switch (functionName) {
 				case "queryScamsByLocation":
@@ -276,6 +264,29 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 						error: "Missing country name",
 						country: countryArg,
 					};
+				case "sendPreventionTipsEmail": {
+					if (countryArg) {
+						try {
+							latestSendTipsAction({ country: countryArg });
+							return {
+								success: true,
+								result: `Okay, I'm sending the prevention tips for ${countryArg} to the user's email.`,
+							};
+						} catch (error) {
+							console.error("Error triggering send prevention tips email:", error);
+							return {
+								success: false,
+								result: `Sorry, I was unable to send the email.`,
+								error: "Email sending failed",
+							};
+						}
+					}
+					return {
+						success: false,
+						result: "Could not send email. Missing country.",
+						error: "Missing parameters",
+					};
+				}
 				case "getHighRiskLocations": {
 					try {
 						const highRisk = latestHighRiskFn ? latestHighRiskFn() : [];
@@ -330,6 +341,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 					setTranscript("");
 					setAssistantResponse("");
 					setIsThinking(false);
+					onSessionActiveChangeRef.current?.(true);
 				});
 
 				vapiInstance.on("call-end", () => {
@@ -339,6 +351,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 					setAssistantResponse("");
 					setIsThinking(false);
 					onVoiceSessionEndRef.current?.();
+					onSessionActiveChangeRef.current?.(false);
 				});
 
 				vapiInstance.on("speech-start", () => {
@@ -393,18 +406,13 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 							if (functionName && rawArgs && toolCallId) {
 								const result = handleFunctionCall(functionName, rawArgs);
 
-								const resolvedCountry =
-									typeof result?.country === "string" && result.country.trim().length > 0
-										? result.country.trim()
-										: "the requested location";
-								const success = Boolean(result?.success);
-								const messagePayload = {
-									success,
-									result: success ? `Successfully focused on ${resolvedCountry}` : `Unable to focus on ${resolvedCountry}`,
-									country: resolvedCountry,
-								};
-
-								sendToolResultToVapi(toolCallId, functionName, messagePayload);
+								// Forward the actual result from the handler so it works for all tools
+								// (Previously this always sent a "focused on" message which was only correct for location queries.)
+								sendToolResultToVapi(toolCallId, functionName, {
+									success: Boolean(result?.success),
+									result: (result as any)?.result,
+									country: (result as any)?.country,
+								});
 							} else {
 								console.warn("🚨 Incomplete tool call data:", { functionName, rawArgs, toolCallId });
 							}
@@ -425,6 +433,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 						setIsListening(false);
 						setIsConnecting(false);
 						setIsThinking(false);
+						onSessionActiveChangeRef.current?.(false);
 					}
 				});
 			},
@@ -432,20 +441,26 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 		);
 
 		const initializeVapiClient = useCallback(() => {
-			const publicKey = resolveVapiPublicKey();
+			const publicKey = PUBLIC_VAPI_PUBLIC_KEY;
 			if (!publicKey) {
 				console.warn("Vapi public key not configured. Voice assistant disabled.");
 				return null;
 			}
 
-			const existingClient = vapiRef.current;
+			// Reuse a singleton across mounts to avoid duplicate SDK initializations (e.g., Krisp)
+			const globalAny = typeof window !== "undefined" ? (window as any) : ({} as any);
+			const existingClient = vapiRef.current ?? (globalAny.__vapiClient as Vapi | undefined) ?? null;
 			if (existingClient) {
 				(existingClient as any).removeAllListeners?.();
 				attachVapiEventHandlers(existingClient);
+				vapiRef.current = existingClient;
 				return existingClient;
 			}
 
 			const vapiInstance = new Vapi(publicKey);
+			if (typeof window !== "undefined") {
+				(globalAny.__vapiClient as any) = vapiInstance;
+			}
 			attachVapiEventHandlers(vapiInstance);
 			vapiRef.current = vapiInstance;
 			return vapiInstance;
@@ -480,7 +495,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 					const locationData = getLocationScamData();
 					const highRiskLocations = getHighRiskLocations();
 					// Temporarily disable assistant ID to use improved inline config
-					const assistantId = resolveVapiAssistantId();
+					const assistantId = PUBLIC_VAPI_ASSISTANT_ID;
 
 					if (assistantId) {
 						await vapi.start(assistantId, {
@@ -489,6 +504,8 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 								highRiskLocations: highRiskLocations.join(", "),
 								travelerName: travelerFallbackName,
 							},
+							// Explicitly disable Krisp denoising to avoid duplicate SDK loads
+							backgroundSpeechDenoisingPlan: { smartDenoisingPlan: { enabled: false } },
 							// Prevent auto-end call configurations
 							maxDurationSeconds: 600, // 10 minutes max duration
 						});
@@ -564,7 +581,17 @@ Error handling:
 - If data is unavailable or something fails, apologize and give best-effort safety advice instead of guessing.
 - Always keep the conversation going with follow-up questions
 
-Your goal: Help ${travelerFallbackName} stay safe using the data above. This is an ongoing conversation that should continue until the user explicitly wants to end it.`,
+Your goal: Help ${travelerFallbackName} stay safe using the data above. This is an ongoing conversation that should continue until the user explicitly wants to end it.
+
+CONVERSATION FLOW AFTER TOOL CALLS:
+1. Call queryScamsByLocation tool (automatically focuses globe).
+2. Immediately provide: risk level + common scam types + 1-2 prevention tips for the location.
+3. After providing the tips, ask the user if they would like a more detailed list of prevention tips sent to their email. For example: "I can also send a more detailed list of prevention tips for [Country] to your email. Would you like me to do that?"
+4. If they say yes, call the 'sendPreventionTipsEmail' function with the correct country. After the tool call, confirm with a message like "Alright, I've sent that to you."
+5. After handling the email request (or if they say no), ALWAYS ask if they want to know about another destination to continue the conversation. For example: "What other places are you considering?"
+6. Never mention map/globe updates - focus only on safety information.
+7. WAIT for user response - DO NOT end conversation.
+8. Continue this pattern indefinitely until user wants to stop.`,
 									},
 								],
 								tools: [
@@ -582,8 +609,25 @@ Your goal: Help ${travelerFallbackName} stay safe using the data above. This is 
 											},
 										},
 									},
+									{
+										type: "function",
+										function: {
+											name: "sendPreventionTipsEmail",
+											description:
+												"Sends an email to the user with scam prevention tips for a specific country. Only call this if the user agrees to receive the email.",
+											parameters: {
+												type: "object",
+												properties: {
+													country: { type: "string", description: "The country for which to send prevention tips." },
+												},
+												required: ["country"],
+											},
+										},
+									},
 								],
 							},
+							// Explicitly disable Krisp denoising to avoid duplicate SDK loads
+							backgroundSpeechDenoisingPlan: { smartDenoisingPlan: { enabled: false } },
 							voice: {
 								provider: "azure",
 								voiceId: "en-US-JennyNeural",
@@ -701,7 +745,7 @@ Your goal: Help ${travelerFallbackName} stay safe using the data above. This is 
 						<p></p>
 						<button
 							onClick={() => vapiRef.current?.stop()}
-							className="rounded bg-red-500/20 px-3 py-1 text-xs text-red-400 transition-all hover:bg-red-500/30"
+							className="cursor-pointer rounded bg-red-500/20 px-3 py-1 text-xs text-red-400 transition-all hover:bg-red-500/30"
 						>
 							End Session
 						</button>

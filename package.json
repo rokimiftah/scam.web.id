@@ -6,7 +6,11 @@
 	"scripts": {
 		"build": "rsbuild build",
 		"dev": "rsbuild dev",
-		"preview": "rsbuild preview"
+		"preview": "rsbuild preview",
+		"typecheck": "tsc --noEmit",
+		"lint:biome": "biome check .",
+		"format:biome": "biome format --write .",
+		"lint": "npm run lint:biome && npm run typecheck"
 	},
 	"dependencies": {
 		"@auth/core": "^0.40.0",

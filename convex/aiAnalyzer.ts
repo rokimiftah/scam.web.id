@@ -2,7 +2,8 @@
 
 import { v } from "convex/values";
 
-import { internal } from "./_generated/api";
+import { getAuthUserId } from "@convex-dev/auth/server";
+import { api, internal } from "./_generated/api";
 import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 
 // OpenAI-compatible LLM configuration
@@ -1165,5 +1166,103 @@ export const getAllComments = internalQuery({
 	args: {},
 	handler: async (ctx) => {
 		return await ctx.db.query("scamComments").collect();
+	},
+});
+
+async function sendEmail(to: string, subject: string, html: string) {
+    const RESEND_API_KEY = process.env.RESEND_API_KEY;
+    if (!RESEND_API_KEY) {
+        console.error("RESEND_API_KEY is not set. Cannot send email.");
+        return;
+    }
+
+    try {
+        const res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${RESEND_API_KEY}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                from: "Travel Scam Alert <noreply@scam.web.id>",
+                to: [to],
+                subject,
+                html,
+            }),
+        });
+
+        const text = await res.text();
+        if (!res.ok) {
+            let message = text;
+            try {
+                const data = JSON.parse(text);
+                message = data?.error?.message || data?.message || text;
+            } catch {}
+            console.error("Resend API error", res.status, text);
+            throw new Error(`Could not send email: ${message}`);
+        }
+    } catch (err: any) {
+        console.error("Failed to send email via Resend fetch:", err);
+        throw new Error(`Could not send email: ${err?.message || "Unknown error"}`);
+    }
+}
+
+export const sendPreventionTips = action({
+	args: { country: v.string() },
+	handler: async (ctx, { country }) => {
+		const RESEND_API_KEY = process.env.RESEND_API_KEY;
+		if (!RESEND_API_KEY) {
+			throw new Error("RESEND_API_KEY is not set in environment variables.");
+		}
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+        console.warn("Not authenticated. Cannot send email.");
+        return;
+    }
+    const user = await ctx.runQuery(api.users.getUserById, { userId });
+    if (!user || !user.email) {
+        console.warn(`User ${userId} not found or missing email. Cannot send email.`);
+        return;
+    }
+
+		const stories = await ctx.runQuery(internal.scams.getScamStoriesForCountry, { country });
+
+		const preventionTips = [...new Set(stories.flatMap((story) => story.preventionTips || []))];
+
+		if (preventionTips.length === 0) {
+			console.log(`No prevention tips found for ${country}. Sending generic email.`);
+			const subject = `Travel Scam Prevention Tips for ${country}`;
+			const htmlBody = `
+                <h1>Travel Scam Prevention Tips for ${country}</h1>
+                <p>Hi ${user.name || "there"},</p>
+                <p>We currently don't have specific prevention tips for ${country}, but here are some general tips to help you stay safe during your travels:</p>
+                <ul>
+                    <li>Be wary of unsolicited offers or "too good to be true" deals.</li>
+                    <li>Always confirm prices before accepting a service.</li>
+                    <li>Keep your valuables secure and out of sight.</li>
+                    <li>Use official transportation and booking services whenever possible.</li>
+                    <li>Inform your bank of your travel plans to avoid card issues.</li>
+                </ul>
+                <p>Stay safe!</p>
+                <p>The Travel Scam Alert Team</p>
+            `;
+			await sendEmail(user.email, subject, htmlBody);
+			return;
+		}
+
+		const subject = `Travel Scam Prevention Tips for ${country}`;
+		const htmlBody = `
+            <h1>Travel Scam Prevention Tips for ${country}</h1>
+            <p>Hi ${user.name || "there"},</p>
+            <p>Here are some prevention tips to help you stay safe during your travels in ${country}:</p>
+            <ul>
+                ${preventionTips.map((tip) => `<li>${tip}</li>`).join("")}
+            </ul>
+            <p>Stay safe!</p>
+            <p>The Travel Scam Alert Team</p>
+        `;
+
+		await sendEmail(user.email, subject, htmlBody);
+		console.log(`Prevention tips email sent to ${user.email} for ${country}.`);
 	},
 });

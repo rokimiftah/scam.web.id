@@ -7,7 +7,7 @@ import type { GlobeMethods } from "react-globe.gl";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import isEmail from "validator/lib/isEmail";
 
@@ -247,8 +247,18 @@ export default function App() {
 	// Component state - declare selectedStoryId first
 	const [selectedStoryId, setSelectedStoryId] = useState<Id<"scamStories"> | null>(null);
 
+	// VAPI → remember last country to offer email tips at session end
+	const [lastVapiCountry, setLastVapiCountry] = useState<string | null>(null);
+	const [showEmailOffer, setShowEmailOffer] = useState(false);
+	const [isSendingOffer, setIsSendingOffer] = useState(false);
+	const [offerSentSuccess, setOfferSentSuccess] = useState(false);
+	const [isSendingRegion, setIsSendingRegion] = useState(false);
+	const [regionSentSuccess, setRegionSentSuccess] = useState(false);
+	const [emailSendError, setEmailSendError] = useState<string | null>(null);
+
 	// Voice-triggered country highlighting
 	const [voiceHighlightedCountry, setVoiceHighlightedCountry] = useState<string | null>(null);
+	const [isVoiceActive, setIsVoiceActive] = useState(false);
 	const countryColorMapRef = useRef<Record<string, string>>({});
 
 	// Fetch real scam data from Convex
@@ -256,6 +266,53 @@ export default function App() {
 	const locationStats = useQuery(api.scams.getLocationStats, {});
 	const totalScamCount = useQuery(api.scams.getTotalScamCount, {}); // Use Convex query for accurate total
 	const selectedStoryDetails = useQuery(api.scams.getScamStory, selectedStoryId ? { storyId: selectedStoryId } : "skip");
+
+	// Action to send prevention tips email
+	const sendPreventionTips = useAction(api.aiAnalyzer.sendPreventionTips);
+
+	const handleSendTipsEmail = useCallback(async () => {
+		if (!lastVapiCountry) {
+			setShowEmailOffer(false);
+			return;
+		}
+
+		try {
+			setOfferSentSuccess(false);
+			setIsSendingOffer(true);
+			setEmailSendError(null);
+			await sendPreventionTips({ country: lastVapiCountry });
+			setOfferSentSuccess(true);
+			// Auto re-enable after a short success display
+			setTimeout(() => setOfferSentSuccess(false), 3000);
+		} catch (err) {
+			console.error("Failed to send prevention tips email:", err);
+			setEmailSendError("Failed to send email. Please try again.");
+		} finally {
+			setIsSendingOffer(false);
+		}
+	}, [lastVapiCountry, sendPreventionTips]);
+
+	// Send tips for a specific country (used in region detail modal button)
+	const handleSendTipsForCountry = useCallback(
+		async (country: string) => {
+			if (!country) return;
+			try {
+				setRegionSentSuccess(false);
+				setIsSendingRegion(true);
+				setEmailSendError(null);
+				await sendPreventionTips({ country });
+				setRegionSentSuccess(true);
+				// Auto re-enable after a short success display
+				setTimeout(() => setRegionSentSuccess(false), 3000);
+			} catch (err) {
+				console.error("Failed to send prevention tips email:", err);
+				setEmailSendError("Failed to send email. Please try again.");
+			} finally {
+				setIsSendingRegion(false);
+			}
+		},
+		[sendPreventionTips],
+	);
 
 	// Sign-in form state
 	const [email, setEmail] = useState("");
@@ -641,19 +698,35 @@ export default function App() {
 									{!isAuthLoading && isAuthenticated ? (
 										<>
 											{/* AI Assistant Button - Flex grow */}
-											<button
-												className="flex flex-1 cursor-pointer items-center justify-center gap-2 border-white/5 bg-gradient-to-r from-blue-600/10 to-purple-600/10 px-6 py-4 transition-all hover:from-blue-600/20 hover:to-purple-600/20"
-												onClick={() => {
-													voiceAssistantRef.current?.toggleVoice();
-												}}
-											>
-												<span className="text-blue-400">
-													<svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-													</svg>
-												</span>
-												<span className="text-sm font-medium text-white/90">AI Assistant</span>
-											</button>
+											{(() => {
+												const assistantDisabled = isVoiceActive || showEmailOffer;
+												const base = "flex flex-1 items-center justify-center gap-2 px-6 py-4 transition-all";
+												const cls = assistantDisabled
+													? `${base} cursor-not-allowed border-white/5 bg-gray-600/10 opacity-50`
+													: `${base} cursor-pointer border-white/5 bg-gradient-to-r from-blue-600/10 to-purple-600/10 hover:from-blue-600/20 hover:to-purple-600/20`;
+												return (
+													<button
+														className={cls}
+														disabled={assistantDisabled}
+														onClick={() => {
+															if (assistantDisabled) return;
+															voiceAssistantRef.current?.toggleVoice();
+														}}
+													>
+														<span className="text-blue-400">
+															<svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																<path
+																	strokeLinecap="round"
+																	strokeLinejoin="round"
+																	strokeWidth={1.5}
+																	d="M13 10V3L4 14h7v7l9-11h-7z"
+																/>
+															</svg>
+														</span>
+														<span className="text-sm font-medium text-white/90">AI Assistant</span>
+													</button>
+												);
+											})()}
 
 											{/* User Menu - Quarter width */}
 											<div className="flex items-center justify-center px-4" style={{ width: "120px", minHeight: "56px" }}>
@@ -765,6 +838,7 @@ export default function App() {
 									setSelected(point);
 									setShowDetail(true);
 									setSelectedStoryId(null);
+									setLastVapiCountry(point.country);
 
 									const cameraTransitionMs = 1200;
 
@@ -802,8 +876,74 @@ export default function App() {
 										controls.autoRotate = true;
 									}
 								}
+								// Prefer the last voice-detected country, fallback to currently selected country on the map
+								const fallbackCountry = lastVapiCountry || selected?.country || null;
+								if (fallbackCountry && isAuthenticated) {
+									setLastVapiCountry(fallbackCountry);
+									setShowEmailOffer(true);
+								}
 							}}
+							onSessionActiveChange={(active) => setIsVoiceActive(active)}
 						/>
+
+						{/* Offer to email prevention tips at voice session end */}
+						{showEmailOffer && lastVapiCountry && (
+							<div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+								<div className="w-full border-y border-white/10 bg-gradient-to-r from-blue-600/20 to-purple-600/20 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
+									<div className="px-5 py-5">
+										<h3 className="text-center text-xl font-light break-words whitespace-normal text-white/90">
+											Send Prevention Tips For {lastVapiCountry}?
+										</h3>
+										<p className="mt-2 text-center text-sm text-white/70">
+											We’ll email a concise list of safety tips based on user reports to help you stay safe.
+										</p>
+
+										{emailSendError && (
+											<div className="mt-3 rounded border border-red-500/20 bg-red-500/10 p-2 text-center text-sm text-red-300">
+												{emailSendError}
+											</div>
+										)}
+
+										<div className="mt-5 grid grid-cols-2 gap-2">
+											<button
+												onClick={() => setShowEmailOffer(false)}
+												className="cursor-pointer rounded border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 transition-colors hover:bg-white/10"
+											>
+												No, Thanks
+											</button>
+											<button
+												onClick={handleSendTipsEmail}
+												disabled={isSendingOffer || offerSentSuccess}
+												className={`flex cursor-pointer items-center justify-center gap-2 rounded px-4 py-2 text-sm font-medium text-white transition-all duration-300 disabled:opacity-60 ${offerSentSuccess ? "bg-green-600" : "bg-gradient-to-r from-blue-500 to-purple-500 hover:opacity-90"}`}
+											>
+												{isSendingOffer && (
+													<svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+														<circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+														<path
+															className="opacity-75"
+															fill="currentColor"
+															d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+														></path>
+													</svg>
+												)}
+												<span className="animate-fadeIn">
+													{offerSentSuccess ? (
+														<svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+															<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+														</svg>
+													) : isSendingOffer ? (
+														"Sending..."
+													) : (
+														"Send Now"
+													)}
+												</span>
+											</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						)}
+
 						{isAuthLoading ? (
 							// Show loading state while checking authentication
 							<div className="flex flex-1 items-center justify-center">
@@ -1711,6 +1851,46 @@ export default function App() {
 											))}
 										</div>
 									</div>
+
+									{/* Send email CTA */}
+									{!showEmailOffer && (
+										<div className="pt-1">
+											<button
+												onClick={() => handleSendTipsForCountry(selected.country)}
+												disabled={!isAuthenticated || isSendingRegion || regionSentSuccess}
+												aria-label={`Send Prevention Tips For ${selected.country}`}
+												className="group relative inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 bg-gradient-to-r from-blue-600/60 via-indigo-600/60 to-purple-600/60 px-3 text-sm font-medium text-white shadow-[0_0_20px_rgba(99,102,241,0.15)] backdrop-blur transition-all hover:from-blue-500/70 hover:to-purple-500/70 hover:shadow-[0_0_30px_rgba(99,102,241,0.25)] focus:ring-2 focus:ring-blue-400/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+											>
+												{isSendingRegion && (
+													<svg className="h-4 w-4 animate-spin text-white/90" viewBox="0 0 24 24" fill="none">
+														<circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+														<path
+															className="opacity-75"
+															fill="currentColor"
+															d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+														></path>
+													</svg>
+												)}
+												<span className="animate-fadeIn max-w-full truncate whitespace-nowrap">
+													{regionSentSuccess ? (
+														<svg className="inline h-4 w-4 align-middle" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+															<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+														</svg>
+													) : isSendingRegion ? (
+														"Sending..."
+													) : (
+														`Send Prevention Tips Email For ${selected.country}`
+													)}
+												</span>
+											</button>
+
+											{!isAuthenticated && (
+												<p className="mt-1 text-center text-xs break-words whitespace-normal text-white/50">
+													Sign In To Send Tips To Your Email.
+												</p>
+											)}
+										</div>
+									)}
 								</div>
 							</div>
 						)}

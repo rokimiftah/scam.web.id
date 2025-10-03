@@ -1,14 +1,7 @@
-import { defineConfig, loadEnv } from "@rsbuild/core";
+import { defineConfig } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
 
-const { publicVars } = loadEnv({
-	prefixes: ["PUBLIC_", "VITE_", "VAPI_"],
-});
-
 export default defineConfig({
-	source: {
-		define: publicVars,
-	},
 	html: {
 		meta: {
 			charset: {

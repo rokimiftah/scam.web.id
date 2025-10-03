@@ -3,7 +3,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 
 export const verifyEmail = mutation({
 	args: { email: v.string(), code: v.string() },
@@ -20,6 +20,16 @@ export const verifyEmail = mutation({
 			emailVerificationTime: Date.now(),
 		});
 		return { success: true };
+	},
+});
+
+export const getInternalUserByToken = internalQuery({
+	args: { tokenIdentifier: v.string() },
+	handler: async (ctx, { tokenIdentifier }) => {
+		const accounts = await ctx.db.query("authAccounts").collect();
+		const account = accounts.find((a) => (a as any).tokenIdentifier === tokenIdentifier);
+		if (!account) return null;
+		return await ctx.db.get(account.userId);
 	},
 });
 
