@@ -39,15 +39,84 @@ const parseFunctionArgs = (rawArgs: unknown): Record<string, any> => {
   return {};
 };
 
+// Remove consecutive duplicate words/phrases from transcript
+const removeDuplicateWords = (text: string): string => {
+  if (!text || !text.trim()) return text;
+
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  const result: string[] = [];
+  let i = 0;
+
+  while (i < words.length) {
+    result.push(words[i]);
+
+    // Look ahead to find repeating patterns
+    let maxSkip = 0;
+    for (let patternLen = 1; patternLen <= Math.min(10, words.length - i); patternLen++) {
+      const pattern = words.slice(i, i + patternLen);
+      const next = words.slice(i + patternLen, i + patternLen + patternLen);
+
+      if (pattern.length === next.length && pattern.every((w, idx) => w.toLowerCase() === next[idx].toLowerCase())) {
+        maxSkip = Math.max(maxSkip, patternLen);
+      }
+    }
+
+    i += maxSkip > 0 ? maxSkip + 1 : 1;
+  }
+
+  return result.join(" ");
+};
+
+// Find overlap between end of text1 and start of text2
+const findOverlap = (text1: string, text2: string): number => {
+  if (!text1 || !text2) return 0;
+
+  const words1 = text1.trim().split(/\s+/);
+  const words2 = text2.trim().split(/\s+/);
+
+  // Try to find the longest overlap
+  let maxOverlap = 0;
+  const maxCheck = Math.min(words1.length, words2.length, 15);
+
+  for (let overlap = maxCheck; overlap > 0; overlap--) {
+    const ending = words1.slice(-overlap);
+    const beginning = words2.slice(0, overlap);
+
+    if (ending.every((w, idx) => w.toLowerCase() === beginning[idx].toLowerCase())) {
+      maxOverlap = overlap;
+      break;
+    }
+  }
+
+  return maxOverlap;
+};
+
+// Merge two texts by removing overlap
+const mergeTexts = (text1: string, text2: string): string => {
+  const overlap = findOverlap(text1, text2);
+
+  if (overlap > 0) {
+    const words2 = text2.trim().split(/\s+/);
+    const uniquePart = words2.slice(overlap).join(" ");
+    return text1.trim() + (uniquePart ? ` ${uniquePart}` : "");
+  }
+
+  return `${text1.trim()} ${text2.trim()}`;
+};
+
 const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistantProps>(
   ({ isAuthenticated, onLocationQuery, onVoiceSessionEnd, onSessionActiveChange }, ref) => {
     const [isListening, setIsListening] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
-    const [transcript, setTranscript] = useState("");
-    const [assistantResponse, setAssistantResponse] = useState("");
+    const [conversationHistory, setConversationHistory] = useState<
+      Array<{ role: "user" | "assistant"; message: string; timestamp: number }>
+    >([]);
     const [isThinking, setIsThinking] = useState(false);
     const vapiRef = useRef<Vapi | null>(null);
     const processedToolCallsRef = useRef<Set<string>>(new Set());
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const lastTranscriptRef = useRef<{ role: string; text: string } | null>(null);
+    const cleaningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Fetch data for the assistant to use
     const scamStories = useQuery(api.scams.getScamStories, { limit: 100 });
@@ -55,6 +124,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
     const trendingScams = useQuery(api.scams.getTrendingScams, {});
     const currentUser = useQuery(api.users.getCurrentUser);
     const sendPreventionTipsEmailAction = useAction(api.aiAnalyzer.sendPreventionTips);
+    const cleanTranscriptAction = useAction(api.aiAnalyzer.cleanTranscript);
 
     const onLocationQueryRef = useRef(onLocationQuery);
     const trendingScamsRef = useRef(trendingScams);
@@ -99,6 +169,14 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
 
     const travelerFallbackName = travelerName ?? "Traveler";
     const travelerGreetingName = travelerName ?? "there";
+
+    // Auto-scroll to latest message
+    // biome-ignore lint/correctness/useExhaustiveDependencies: Dependencies are intentional triggers for scroll behavior
+    useEffect(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
+    }, [conversationHistory, isThinking]);
 
     // Process scam data for the assistant
     const getLocationScamData = useCallback(() => {
@@ -332,31 +410,59 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
       (vapiInstance: Vapi) => {
         vapiInstance.on("call-start", () => {
           processedToolCallsRef.current.clear();
+          lastTranscriptRef.current = null;
           setIsListening(true);
           setIsConnecting(false);
-          setTranscript("");
-          setAssistantResponse("");
+          setConversationHistory([]);
           setIsThinking(false);
           onSessionActiveChangeRef.current?.(true);
         });
 
         vapiInstance.on("call-end", () => {
+          if (cleaningTimeoutRef.current) {
+            clearTimeout(cleaningTimeoutRef.current);
+          }
           setIsListening(false);
           setIsConnecting(false);
-          setTranscript("");
-          setAssistantResponse("");
           setIsThinking(false);
           onVoiceSessionEndRef.current?.();
           onSessionActiveChangeRef.current?.(false);
         });
 
         vapiInstance.on("speech-start", () => {
-          setAssistantResponse("");
           setIsThinking(false);
         });
 
         vapiInstance.on("speech-end", () => {
           setIsThinking(false);
+
+          // Clean assistant's last message with LLM after speech ends (debounced)
+          if (cleaningTimeoutRef.current) {
+            clearTimeout(cleaningTimeoutRef.current);
+          }
+
+          cleaningTimeoutRef.current = setTimeout(async () => {
+            setConversationHistory((prev) => {
+              const lastMsg = prev[prev.length - 1];
+              if (lastMsg && lastMsg.role === "assistant" && lastMsg.message.trim()) {
+                // Clean the transcript asynchronously
+                cleanTranscriptAction({ transcript: lastMsg.message })
+                  .then((result) => {
+                    if (result.cleaned !== lastMsg.message) {
+                      setConversationHistory((current) => {
+                        const last = current[current.length - 1];
+                        if (last && last.role === "assistant" && last.message === lastMsg.message) {
+                          return [...current.slice(0, -1), { ...last, message: result.cleaned }];
+                        }
+                        return current;
+                      });
+                    }
+                  })
+                  .catch((err) => console.error("Failed to clean transcript:", err));
+              }
+              return prev;
+            });
+          }, 1000); // Wait 1 second after speech ends before cleaning
         });
 
         vapiInstance.on("message", async (message: any) => {
@@ -366,11 +472,67 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
           }
 
           if (message.type === "transcript") {
+            const rawTranscript = message.transcript || "";
+            // Clean consecutive duplicate words/phrases
+            const newTranscript = removeDuplicateWords(rawTranscript);
+            const newRole = message.role;
+
+            // Deduplication: Skip if exact same transcript from same role
+            if (
+              lastTranscriptRef.current &&
+              lastTranscriptRef.current.role === newRole &&
+              lastTranscriptRef.current.text === newTranscript
+            ) {
+              return; // Skip duplicate
+            }
+
+            // Update last transcript tracker
+            lastTranscriptRef.current = { role: newRole, text: newTranscript };
+
+            setConversationHistory((prev) => {
+              const lastMsg = prev[prev.length - 1];
+
+              if (lastMsg && lastMsg.role === newRole) {
+                // Same role - check if streaming update or new segment
+                const lastText = lastMsg.message.toLowerCase().trim();
+                const newText = newTranscript.toLowerCase().trim();
+
+                // If new text contains old text (cumulative/streaming) - REPLACE
+                if (newText.includes(lastText) && newText.length > lastText.length) {
+                  return [...prev.slice(0, -1), { ...lastMsg, message: newTranscript }];
+                }
+
+                // If old text contains new text (correction/shorter version) - REPLACE
+                if (lastText.includes(newText)) {
+                  return [...prev.slice(0, -1), { ...lastMsg, message: newTranscript }];
+                }
+
+                // Otherwise merge with overlap detection
+                const merged = mergeTexts(lastMsg.message, newTranscript);
+                return [
+                  ...prev.slice(0, -1),
+                  {
+                    ...lastMsg,
+                    message: merged,
+                  },
+                ];
+              }
+
+              // Different role or no previous message - CREATE new message
+              return [
+                ...prev,
+                {
+                  role: newRole,
+                  message: newTranscript,
+                  timestamp: Date.now(),
+                },
+              ];
+            });
+
+            // Update thinking state
             if (message.role === "user") {
-              setTranscript(message.transcript);
               setIsThinking(true);
             } else if (message.role === "assistant") {
-              setAssistantResponse(message.transcript);
               setIsThinking(false);
             }
           }
@@ -447,7 +609,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
           }
         });
       },
-      [handleFunctionCall, sendToolResultToVapi],
+      [handleFunctionCall, sendToolResultToVapi, cleanTranscriptAction],
     );
 
     const initializeVapiClient = useCallback(() => {
@@ -479,6 +641,9 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
     useEffect(() => {
       const client = initializeVapiClient();
       return () => {
+        if (cleaningTimeoutRef.current) {
+          clearTimeout(cleaningTimeoutRef.current);
+        }
         if (!client) {
           return;
         }
@@ -673,9 +838,9 @@ CONVERSATION FLOW AFTER TOOL CALLS:
     }
 
     return (
-      <div className="absolute inset-0 z-50 flex flex-col bg-gradient-to-b from-blue-600/10 to-purple-600/10 backdrop-blur-sm">
+      <div className="absolute inset-0 z-50 flex flex-col" style={{ backgroundColor: "#1a1a1f" }}>
         {/* Header */}
-        <div className="border-b border-white/10 bg-gradient-to-r from-blue-600/20 to-purple-600/20 px-4 py-3">
+        <div className="border-b border-white/5 px-6 py-4" style={{ backgroundColor: "#16161b" }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="relative">
@@ -694,7 +859,7 @@ CONVERSATION FLOW AFTER TOOL CALLS:
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto" style={{ backgroundColor: "#1a1a1f" }}>
           {isConnecting ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
@@ -710,52 +875,98 @@ CONVERSATION FLOW AFTER TOOL CALLS:
               </div>
             </div>
           ) : (
-            <div className="space-y-4">
-              {/* Transcript */}
-              {transcript && (
-                <div className="animate-fadeIn">
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className="text-xs font-medium text-blue-400">You</span>
-                    {isThinking && (
-                      <div className="flex space-x-1">
-                        <div className="h-1 w-1 animate-bounce rounded-full bg-white/40" style={{ animationDelay: "0ms" }}></div>
+            <div className="space-y-0">
+              {conversationHistory.length === 0 ? (
+                <div className="flex h-full items-center justify-center p-6">
+                  <p className="text-sm text-white/40">Start speaking to begin conversation...</p>
+                </div>
+              ) : (
+                conversationHistory.map((msg, idx) => (
+                  <div
+                    key={`${msg.timestamp}-${idx}`}
+                    className={`animate-fadeIn border-b border-white/5 px-6 py-4 ${
+                      msg.role === "user" ? "bg-blue-500/5" : "bg-purple-500/5"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={`flex-shrink-0 rounded-full p-2 ${
+                          msg.role === "user" ? "bg-blue-500/10" : "bg-purple-500/10"
+                        }`}
+                      >
+                        {msg.role === "user" ? (
+                          <svg className="h-4 w-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                            />
+                          </svg>
+                        ) : (
+                          <svg className="h-4 w-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className={`text-xs font-medium ${msg.role === "user" ? "text-blue-400" : "text-purple-400"}`}>
+                            {msg.role === "user" ? "You" : "AI Assistant"}
+                          </span>
+                          <span className="text-xs text-white/30">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        <p className="text-sm leading-relaxed break-words text-white/80">{msg.message}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {/* Thinking Indicator */}
+              {isThinking && (
+                <div className="animate-fadeIn border-b border-white/5 bg-purple-500/5 px-6 py-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 rounded-full bg-purple-500/10 p-2">
+                      <svg className="h-4 w-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <span className="mb-1 block text-xs font-medium text-purple-400">AI Assistant</span>
+                      <div className="flex items-center gap-1">
                         <div
-                          className="h-1 w-1 animate-bounce rounded-full bg-white/40"
+                          className="h-2 w-2 animate-bounce rounded-full bg-purple-400/60"
+                          style={{ animationDelay: "0ms" }}
+                        ></div>
+                        <div
+                          className="h-2 w-2 animate-bounce rounded-full bg-purple-400/60"
                           style={{ animationDelay: "150ms" }}
                         ></div>
                         <div
-                          className="h-1 w-1 animate-bounce rounded-full bg-white/40"
+                          className="h-2 w-2 animate-bounce rounded-full bg-purple-400/60"
                           style={{ animationDelay: "300ms" }}
                         ></div>
                       </div>
-                    )}
-                  </div>
-                  <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
-                    <p className="text-sm text-white/90">{transcript}</p>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Assistant Response */}
-              {assistantResponse && (
-                <div className="animate-fadeIn">
-                  <p className="mb-2 text-xs font-medium text-purple-400">Assistant</p>
-                  <div className="rounded-lg border border-purple-500/20 bg-purple-500/10 p-3">
-                    <p className="text-sm leading-relaxed text-white/90">{assistantResponse}</p>
-                  </div>
-                </div>
-              )}
+              <div ref={messagesEndRef} />
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="border-t border-white/10 bg-black/20 px-4 py-3">
+        <div className="border-t border-white/10 bg-black/20 px-6 py-3">
           <div className="flex items-center justify-between">
-            <p></p>
+            <span className="text-xs text-white/40">{conversationHistory.length} messages</span>
             <button
               onClick={() => vapiRef.current?.stop()}
-              className="cursor-pointer rounded bg-red-500/20 px-3 py-1 text-xs text-red-400 transition-all hover:bg-red-500/30"
+              className="cursor-pointer bg-red-500/20 px-4 py-2 text-xs font-medium text-red-400 transition-all hover:bg-red-500/30"
             >
               End Session
             </button>

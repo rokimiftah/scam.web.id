@@ -282,8 +282,12 @@ export default function App() {
       setEmailSendError(null);
       await sendPreventionTips({ country: lastVapiCountry });
       setOfferSentSuccess(true);
-      // Auto re-enable after a short success display
-      setTimeout(() => setOfferSentSuccess(false), 3000);
+
+      // Close modal after showing success (1.5s delay)
+      setTimeout(() => {
+        setShowEmailOffer(false);
+        setOfferSentSuccess(false);
+      }, 1500);
     } catch (err) {
       console.error("Failed to send prevention tips email:", err);
       setEmailSendError("Failed to send email. Please try again.");
