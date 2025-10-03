@@ -1624,15 +1624,15 @@ export default function App() {
 											height={windowSize.height}
 											backgroundColor="#15151a"
 											globeImageUrl="https://cdn.jsdelivr.net/npm/three-globe@2.31.1/example/img/earth-dark.jpg"
-											showAtmosphere={true}
+											showAtmosphere={false} // Disable atmosphere for better performance
 											atmosphereColor="#3b82f6"
 											atmosphereAltitude={0.15}
 											enablePointerInteraction={true}
 											// Hexed polygons layer - with voice highlighting
 											hexPolygonsData={countries}
-											hexPolygonResolution={3}
-											hexPolygonMargin={0.1}
-											hexPolygonsTransitionDuration={1200}
+											hexPolygonResolution={3} // Reduced resolution for performance
+											hexPolygonMargin={0.2} // Increased margin to reduce overlap calculations
+											hexPolygonsTransitionDuration={0} // No transition for better performance
 											hexPolygonColor={(d: any) => {
 												// Get the database country name from the GeoJSON name
 												const geoJsonName = d.properties?.NAME;
@@ -1696,7 +1696,7 @@ export default function App() {
 												// Simplified radius calculation for better performance
 												return 0.4 + Math.min(0.4, d.reports / 500);
 											}}
-											pointAltitude={0.01}
+											pointAltitude={0.02} // Slightly increased altitude for better visibility
 											pointsTransitionDuration={0}
 											// Rings layer for pulse effect
 											ringsData={filtered}
