@@ -2,22 +2,22 @@ import { defineConfig } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
 
 export default defineConfig({
-	html: {
-		meta: {
-			charset: {
-				charset: "UTF-8",
-			},
-			description: "Travel Scam Alert - Everyone Should Be Safe Everywhere",
-		},
-		favicon: "public/logo.png",
-		title: "Travel Scam Alert",
-		// Inject critical inline styles and script to prevent white flash
-		tags: [
-			{
-				tag: "style",
-				head: true,
-				append: false,
-				children: `
+  html: {
+    meta: {
+      charset: {
+        charset: "UTF-8",
+      },
+      description: "Travel Scam Alert - Everyone Should Be Safe Everywhere",
+    },
+    favicon: "public/logo.png",
+    title: "Travel Scam Alert",
+    // Inject critical inline styles and script to prevent white flash
+    tags: [
+      {
+        tag: "style",
+        head: true,
+        append: false,
+        children: `
 					html, body {
 						background-color: #15151a !important;
 						margin: 0;
@@ -62,12 +62,12 @@ export default defineConfig({
 						background-color: #15151a !important;
 					}
 				`,
-			},
-			{
-				tag: "script",
-				head: true,
-				append: false,
-				children: `
+      },
+      {
+        tag: "script",
+        head: true,
+        append: false,
+        children: `
 					// Immediately set backgrounds before anything renders
 					if (document.documentElement) {
 						document.documentElement.style.backgroundColor = '#15151a';
@@ -117,14 +117,14 @@ export default defineConfig({
 						}
 					}
 				`,
-			},
-		],
-	},
+      },
+    ],
+  },
 
-	plugins: [pluginReact()],
+  plugins: [pluginReact()],
 
-	server: {
-		host: "localhost",
-		port: 3000,
-	},
+  server: {
+    host: "localhost",
+    port: 3000,
+  },
 });
