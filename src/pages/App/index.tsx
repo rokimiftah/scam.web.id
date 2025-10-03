@@ -1631,7 +1631,7 @@ export default function App() {
 											// Hexed polygons layer - with voice highlighting
 											hexPolygonsData={countries}
 											hexPolygonResolution={3}
-											hexPolygonMargin={0.3}
+											hexPolygonMargin={0.1}
 											hexPolygonsTransitionDuration={1200}
 											hexPolygonColor={(d: any) => {
 												// Get the database country name from the GeoJSON name
