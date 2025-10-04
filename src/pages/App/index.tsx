@@ -1252,115 +1252,135 @@ export default function App() {
                   </div>
                 ) : selected ? (
                   /* Show all stories for the selected country */
-                  <div className="no-scrollbar space-y-6 overflow-y-auto p-6">
-                    <div className="border-b border-white/10 pb-4">
+                  <div className="no-scrollbar space-y-4 overflow-y-auto p-4">
+                    <div>
                       <div className="flex items-start justify-between">
-                        <h2 className="mb-2 flex-1 pr-4 text-xl font-light text-white/90">
-                          {selected.reports} Scams in {selected.country}
-                        </h2>
+                        <div className="flex-1 pr-4">
+                          <h2 className="mb-2 text-xl font-medium text-white">
+                            {selected.reports} Scams in {selected.country}
+                          </h2>
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-white/60">
+                            <span className="flex items-center gap-2">
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={1.5}
+                                  d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                                />
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={1.5}
+                                  d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                                />
+                              </svg>
+                              {selected.location === selected.country
+                                ? selected.country
+                                : `${selected.location}, ${selected.country}`}
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={1.5}
+                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
+                              </svg>
+                              Total: {selected.reports} {selected.reports === 1 ? "report" : "reports"}
+                            </span>
+                            {selected.lastReport && (
+                              <span className="flex items-center gap-2">
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={1.5}
+                                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                  />
+                                </svg>
+                                Last: {new Date(selected.lastReport).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                         <button
                           onClick={() => {
                             setSelectedStoryId(null);
                             setSelected(null);
                             setShowDetail(false);
                           }}
-                          className="text-white/40 transition-colors hover:text-white/60"
+                          className="p-2 text-white/40 transition-colors hover:text-white/70"
                           aria-label="Close"
                         >
-                          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                           </svg>
                         </button>
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-white/60">
-                        <span className="flex items-center gap-1">
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={1.5}
-                              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                            />
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={1.5}
-                              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                            />
-                          </svg>
-                          {selected.location === selected.country
-                            ? selected.country
-                            : `${selected.location}, ${selected.country}`}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={1.5}
-                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                            />
-                          </svg>
-                          Total: {selected.reports} {selected.reports === 1 ? "report" : "reports"}
-                        </span>
-                        {selected.lastReport && (
-                          <span className="flex items-center gap-1">
-                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={1.5}
-                                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                              />
-                            </svg>
-                            Last: {new Date(selected.lastReport).toLocaleDateString()}
-                          </span>
-                        )}
-                      </div>
                     </div>
 
-                    {/* Summary - Always show */}
-                    <div className="rounded bg-white/5 p-4">
-                      <p className="mb-2 text-xs tracking-wider text-white/40 uppercase">Summary</p>
-                      <p className="text-white/80">
+                    {/* Summary */}
+                    <div className="bg-white/5 p-4">
+                      <p className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-wider text-white/50 uppercase">
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={1.5}
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                          />
+                        </svg>
+                        Summary
+                      </p>
+                      <p className="text-sm leading-relaxed text-white/90">
                         {selected.summary || `Multiple scam reports from various cities in ${selected.country}`}
                       </p>
                     </div>
 
-                    {/* Stats - Always show in 2x2 grid */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="rounded bg-white/5 p-4">
-                        <p className="mb-1 text-xs tracking-wider text-white/40 uppercase">Risk Level</p>
-                        <p className="text-2xl font-light" style={{ color: riskColor(selected.risk) }}>
+                    {/* Stats - 2x2 grid */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-red-500/10 p-4 transition-colors hover:bg-red-500/15">
+                        <p className="mb-1 text-xs font-semibold tracking-wider text-white/50 uppercase">Risk Level</p>
+                        <p className="text-2xl font-semibold" style={{ color: riskColor(selected.risk) }}>
                           {(selected.risk * 100).toFixed(0)}%
                         </p>
                       </div>
-                      <div className="rounded bg-white/5 p-4">
-                        <p className="mb-1 text-xs tracking-wider text-white/40 uppercase">Total Loss</p>
-                        <p className="text-2xl font-light text-red-400">
+                      <div className="bg-amber-500/10 p-4 transition-colors hover:bg-amber-500/15">
+                        <p className="mb-1 text-xs font-semibold tracking-wider text-white/50 uppercase">Total Loss</p>
+                        <p className="text-2xl font-semibold text-amber-400">
                           {selected.moneyLost ? `${selected.currency || "$"}${selected.moneyLost}` : "N/A"}
                         </p>
                       </div>
-                      <div className="rounded bg-white/5 p-4">
-                        <p className="mb-1 text-xs tracking-wider text-white/40 uppercase">Reports</p>
-                        <p className="text-2xl font-light text-blue-400">{selected.reports}</p>
+                      <div className="bg-blue-500/10 p-4 transition-colors hover:bg-blue-500/15">
+                        <p className="mb-1 text-xs font-semibold tracking-wider text-white/50 uppercase">Reports</p>
+                        <p className="text-2xl font-semibold text-blue-400">{selected.reports}</p>
                       </div>
-                      <div className="rounded bg-white/5 p-4">
-                        <p className="mb-1 text-xs tracking-wider text-white/40 uppercase">Scam Types</p>
-                        <p className="text-2xl font-light text-amber-400">{selected.types ? selected.types.length : 0}</p>
+                      <div className="bg-purple-500/10 p-4 transition-colors hover:bg-purple-500/15">
+                        <p className="mb-1 text-xs font-semibold tracking-wider text-white/50 uppercase">Scam Types</p>
+                        <p className="text-2xl font-semibold text-purple-400">{selected.types ? selected.types.length : 0}</p>
                       </div>
                     </div>
 
-                    {/* Scam Types - Always show */}
-                    <div className="rounded bg-white/5 p-4">
-                      <p className="mb-3 text-xs tracking-wider text-white/40 uppercase">
+                    {/* Scam Types */}
+                    <div className="bg-white/5 p-4">
+                      <p className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-wider text-white/50 uppercase">
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={1.5}
+                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                          />
+                        </svg>
                         Common Scam Types in {selected.country}
                       </p>
                       <div className="space-y-2">
                         {selected.types && selected.types.length > 0 ? (
                           selected.types.slice(0, 5).map((type: string, i: number) => (
-                            <div key={i} className="flex items-center gap-2 text-sm text-white/70">
-                              <div className="h-1.5 w-1.5 rounded-full bg-red-400/60"></div>
+                            <div key={i} className="flex items-center gap-2 bg-red-500/10 px-3 py-2 text-sm text-white/80">
+                              <div className="h-2 w-2 rounded-full bg-red-400"></div>
                               <span className="capitalize">{type.replace(/_/g, " ")}</span>
                             </div>
                           ))
@@ -1373,47 +1393,48 @@ export default function App() {
                     {/* AI Summary for each story */}
                     {selected.stories && selected.stories.length > 0 && (
                       <div className="space-y-4">
-                        <h3 className="flex items-center gap-2 text-lg font-light text-white/90">
-                          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
+                        <h3 className="flex items-center gap-2 text-lg font-semibold text-white">
+                          <div className="bg-blue-500 p-2">
+                            <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                          </div>
                           AI Analysis Summary
                         </h3>
                         <div className="scams-list max-h-[500px] space-y-4 overflow-y-auto pr-2">
                           {selected.stories.map((story: any, idx: number) => (
-                            <div
-                              key={story._id || idx}
-                              className="rounded-lg border border-white/10 bg-gradient-to-r from-blue-500/5 to-purple-500/5 p-5"
-                            >
+                            <div key={story._id || idx} className="bg-white/5 p-4 transition-colors hover:bg-white/[0.07]">
                               {/* Header */}
                               <div className="mb-3 flex items-start justify-between">
                                 <div>
-                                  <h4 className="text-base font-medium text-white/90">
+                                  <h4 className="text-base font-semibold text-white">
                                     {story.city && story.city !== "Unknown" ? story.city : `Location ${idx + 1}`}
                                   </h4>
                                   <p className="mt-1 text-xs text-white/50">
                                     {story.postDate ? new Date(story.postDate).toLocaleDateString() : ""}
                                   </p>
                                 </div>
-                                <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs font-medium text-red-400">
+                                <span className="bg-red-500/20 px-4 py-1.5 text-xs font-semibold text-red-400">
                                   {story.scamType?.replace(/_/g, " ") || "unknown"}
                                 </span>
                               </div>
 
                               {/* AI Summary */}
                               {story.summary && (
-                                <div className="mb-4">
-                                  <p className="text-sm leading-relaxed text-white/80">{story.summary}</p>
+                                <div className="mb-3 bg-white/[0.03] p-3">
+                                  <p className="text-sm leading-relaxed text-white/90">{story.summary}</p>
                                 </div>
                               )}
 
                               {/* Warning Signals */}
                               {story.warningSignals && story.warningSignals.length > 0 && (
                                 <div className="mb-3">
-                                  <p className="mb-2 text-xs font-medium text-red-400">⚠️ Warning Signals:</p>
-                                  <div className="flex flex-wrap gap-1">
+                                  <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-red-400">
+                                    <span className="text-base">⚠️</span> Warning Signals
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
                                     {story.warningSignals.slice(0, 3).map((signal: string, i: number) => (
-                                      <span key={i} className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-300">
+                                      <span key={i} className="bg-red-500/15 px-2 py-1 text-xs font-medium text-red-300">
                                         {signal}
                                       </span>
                                     ))}
@@ -1424,10 +1445,12 @@ export default function App() {
                               {/* Prevention Tips */}
                               {story.preventionTips && story.preventionTips.length > 0 && (
                                 <div className="mb-3">
-                                  <p className="mb-2 text-xs font-medium text-green-400">✅ Prevention Tips:</p>
-                                  <div className="flex flex-wrap gap-1">
+                                  <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-green-400">
+                                    <span className="text-base">✅</span> Prevention Tips
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
                                     {story.preventionTips.slice(0, 3).map((tip: string, i: number) => (
-                                      <span key={i} className="rounded bg-green-500/10 px-2 py-1 text-xs text-green-300">
+                                      <span key={i} className="bg-green-500/15 px-2 py-1 text-xs font-medium text-green-300">
                                         {tip}
                                       </span>
                                     ))}
@@ -1436,16 +1459,18 @@ export default function App() {
                               )}
 
                               {/* Footer Stats */}
-                              <div className="flex items-center justify-between border-t border-white/5 pt-3">
-                                <div className="flex gap-3 text-xs">
+                              <div className="flex items-center justify-between border-t border-white/10 pt-3">
+                                <div className="flex gap-4 text-xs font-medium">
                                   {story.moneyLost && (
-                                    <span className="text-amber-400">
+                                    <span className="flex items-center gap-1.5 text-amber-400">
                                       💸 {story.currency || "$"}
                                       {story.moneyLost}
                                     </span>
                                   )}
                                   {story.aiConfidenceScore && (
-                                    <span className="text-blue-400">🤖 {(story.aiConfidenceScore * 100).toFixed(0)}%</span>
+                                    <span className="flex items-center gap-1.5 text-blue-400">
+                                      🤖 {(story.aiConfidenceScore * 100).toFixed(0)}%
+                                    </span>
                                   )}
                                 </div>
                                 <span className="text-xs text-white/40">
@@ -1460,12 +1485,17 @@ export default function App() {
 
                     {/* Info Note for comment scams only */}
                     {(!selected.stories || selected.stories.length === 0) && (
-                      <div className="rounded border border-blue-500/20 bg-blue-500/10 p-4">
-                        <p className="mb-1 text-xs text-blue-400">ℹ️ Note</p>
-                        <p className="text-sm text-white/70">
-                          This location has scam reports found in comments. These are additional scam stories shared by users in
-                          comment sections that weren't posted as main stories.
-                        </p>
+                      <div className="bg-blue-500/10 p-4">
+                        <div className="flex gap-3">
+                          <span className="text-xl">ℹ️</span>
+                          <div>
+                            <p className="mb-1 font-semibold text-blue-400">Note</p>
+                            <p className="text-sm leading-relaxed text-white/80">
+                              This location has scam reports found in comments. These are additional scam stories shared by users
+                              in comment sections that weren't posted as main stories.
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
