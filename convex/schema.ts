@@ -49,6 +49,7 @@ export default defineSchema({
     authorUsername: v.string(),
     postDate: v.number(),
     upvotes: v.number(),
+    num_comments: v.optional(v.number()), // Number of comments on Reddit
 
     // Story content
     title: v.string(),
@@ -95,6 +96,8 @@ export default defineSchema({
     updatedAt: v.number(),
     isProcessed: v.boolean(),
     processingErrors: v.optional(v.array(v.string())),
+    processingAttempts: v.optional(v.number()),
+    lastAttemptAt: v.optional(v.number()),
 
     // Source tracking (for stories created from comments)
     sourceCommentId: v.optional(v.id("scamComments")),
@@ -103,8 +106,10 @@ export default defineSchema({
     .index("by_country", ["country"])
     .index("by_type", ["scamType"])
     .index("by_subreddit", ["subreddit"])
+    .index("by_post_id", ["postId"]) // Unique index for duplicate detection
     .index("by_date", ["postDate"])
     .index("by_verification", ["verificationStatus"])
+    .index("by_processed", ["isProcessed"])
     .searchIndex("search_stories", {
       searchField: "fullStory",
       filterFields: ["country", "scamType", "verificationStatus"],

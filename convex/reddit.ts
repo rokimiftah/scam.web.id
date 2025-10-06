@@ -3,7 +3,7 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import { action, internalAction, internalMutation, mutation, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 
 const REDDIT_KEYWORDS = [
   "travel scam",
@@ -33,13 +33,14 @@ export const fetchRedditPosts = internalAction({
     subreddit: v.string(),
     keyword: v.string(),
     limit: v.optional(v.number()),
+    skipComments: v.optional(v.boolean()), // Option to skip comments entirely
   },
   handler: async (ctx, args) => {
-    const { subreddit, keyword, limit = 100 } = args;
+    const { subreddit, keyword, limit = 100, skipComments = false } = args;
 
     try {
       // Add delay before request to respect rate limits
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       // Using Reddit's JSON API (no auth needed for public data)
       const searchUrl = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(
@@ -105,12 +106,18 @@ export const fetchRedditPosts = internalAction({
 
       // Store posts for processing
       let postCount = 0;
-      for (const post of posts) {
+      let postsInserted = 0;
+      let commentsProcessed = 0;
+      const maxPostsToProcess = Math.min(posts.length, 100); // Process max 100 posts per keyword (Reddit API limit)
+
+      console.log(`Processing ${maxPostsToProcess}/${posts.length} posts for ${subreddit}/${keyword}`);
+
+      for (const post of posts.slice(0, maxPostsToProcess)) {
         postCount++;
-        console.log(`[${postCount}/${posts.length}] Processing: ${post.title.substring(0, 50)}...`);
+        console.log(`[${postCount}/${maxPostsToProcess}] ${post.title.substring(0, 50)}...`);
 
         try {
-          await ctx.runMutation(internal.reddit.storeRawPost, {
+          const storeResult = await ctx.runMutation(internal.reddit.storeRawPost, {
             postData: {
               id: post.id,
               title: post.title,
@@ -126,33 +133,45 @@ export const fetchRedditPosts = internalAction({
             keyword,
           });
 
-          // Fetch ALL comments for every post
-          if (post.num_comments > 0) {
-            console.log(`  → Fetching ${post.num_comments} comments for post ID: ${post.id}`);
+          if (storeResult.inserted) {
+            postsInserted++;
+          }
+
+          // Fetch comments only if not skipped
+          if (!skipComments && post.num_comments > 0 && post.num_comments <= 50 && commentsProcessed < 20) {
+            console.log(`  → Fetching ${post.num_comments} comments (${commentsProcessed}/20)`);
             try {
               await fetchPostComments(ctx, post.id, subreddit);
-              // Small delay between comment fetches to avoid rate limit
-              await new Promise((resolve) => setTimeout(resolve, 500));
+              commentsProcessed++;
+              // No delay - go fast
             } catch (commentError) {
-              console.error(`  ✗ Failed to fetch comments for post ${post.id}:`, commentError);
-              // Continue with next post even if comments fail
+              console.error(`  ✗ Comment fetch failed:`, commentError);
             }
+          } else if (skipComments) {
+            // Skip all comments
+          } else if (post.num_comments > 50) {
+            console.log(`  ⊘ Skip ${post.num_comments} comments (too many)`);
+          } else if (commentsProcessed >= 20) {
+            console.log(`  ⊘ Skip (comment limit reached)`);
           }
         } catch (postError) {
           console.error(`✗ Failed to store post ${post.id}:`, postError);
-          // Continue with next post
         }
       }
+
+      console.log(
+        `✓ Processed ${postCount} posts: ${postsInserted} new, ${postCount - postsInserted} duplicates, ${commentsProcessed} comment threads`,
+      );
 
       // Update job status
       await ctx.runMutation(internal.reddit.updateFetchJobStatus, {
         subreddit,
         keyword,
         status: "completed",
-        postsProcessed: posts.length,
+        postsProcessed: postsInserted,
       });
 
-      return { success: true, postsProcessed: posts.length };
+      return { success: true, postsProcessed: postsInserted, totalFetched: posts.length };
     } catch (error) {
       await ctx.runMutation(internal.reddit.updateFetchJobStatus, {
         subreddit,
@@ -171,35 +190,60 @@ async function fetchPostComments(ctx: any, postId: string, subreddit: string) {
     // Fetch ALL comments (limit=500 for maximum)
     const commentsUrl = `https://www.reddit.com/r/${subreddit}/comments/${postId}.json?limit=500&depth=10`;
 
+    console.log(`Fetching: ${commentsUrl}`);
+
     const response = await fetch(commentsUrl, {
       headers: {
         "User-Agent": "TravelScamTracker/1.0",
+        Accept: "application/json",
       },
     });
 
-    if (!response.ok) return;
+    console.log(`Response status: ${response.status}`);
+
+    if (!response.ok) {
+      console.error(`HTTP error ${response.status} for ${postId}`);
+      return;
+    }
 
     const data = await response.json();
-    if (data.length < 2) return;
+    if (data.length < 2) {
+      console.log(`No comments data for ${postId}`);
+      return;
+    }
 
     const comments = data[1].data.children;
+    console.log(`Found ${comments.length} comments for ${postId}`);
 
+    // Store comments in batches to avoid OCC errors
+    const commentBatch = [];
     for (const comment of comments) {
       if (comment.kind === "t1" && comment.data.body) {
-        await ctx.runMutation(internal.reddit.storeRawComment, {
-          commentData: {
-            id: comment.data.id,
-            postId: postId,
-            body: comment.data.body,
-            author: comment.data.author,
-            created_utc: comment.data.created_utc,
-            ups: comment.data.ups,
-          },
+        commentBatch.push({
+          id: comment.data.id,
+          postId: postId,
+          body: comment.data.body,
+          author: comment.data.author,
+          created_utc: comment.data.created_utc,
+          ups: comment.data.ups,
         });
       }
     }
+
+    // Store all comments in one mutation call to reduce conflicts
+    if (commentBatch.length > 0) {
+      await ctx.runMutation(internal.reddit.storeBatchComments, {
+        comments: commentBatch,
+      });
+    }
   } catch (error) {
     console.error(`Failed to fetch comments for post ${postId}:`, error);
+    console.error(`Error details:`, {
+      name: error instanceof Error ? error.name : "Unknown",
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack?.substring(0, 200) : undefined,
+    });
+    throw error; // Re-throw to see in main function
   }
 }
 
@@ -219,13 +263,12 @@ export const storeRawPost = internalMutation({
     }),
     keyword: v.string(),
   },
-  handler: async (ctx, args) => {
-    // Check if post already exists
+  handler: async (ctx, args): Promise<{ inserted: boolean }> => {
+    // Check if post already exists using unique index
     const existing = await ctx.db
       .query("scamStories")
-      .withIndex("by_subreddit")
-      .filter((q) => q.eq(q.field("postId"), args.postData.id))
-      .first();
+      .withIndex("by_post_id", (q) => q.eq("postId", args.postData.id))
+      .unique();
 
     if (!existing) {
       console.log(`  ✓ Storing new post: ${args.postData.id}`);
@@ -237,6 +280,7 @@ export const storeRawPost = internalMutation({
         authorUsername: args.postData.author,
         postDate: args.postData.created_utc * 1000,
         upvotes: args.postData.ups,
+        num_comments: args.postData.num_comments,
         title: args.postData.title,
         summary: "", // Will be filled by AI
         fullStory: args.postData.selftext,
@@ -255,8 +299,10 @@ export const storeRawPost = internalMutation({
         updatedAt: Date.now(),
         isProcessed: false,
       });
+      return { inserted: true };
     } else {
       console.log(`  ⟲ Post already exists: ${args.postData.id} - skipping`);
+      return { inserted: false };
     }
   },
 });
@@ -301,6 +347,67 @@ export const storeRawComment = internalMutation({
         });
       }
     }
+  },
+});
+
+// Batch insert comments to avoid OCC conflicts
+export const storeBatchComments = internalMutation({
+  args: {
+    comments: v.array(
+      v.object({
+        id: v.string(),
+        postId: v.string(),
+        body: v.string(),
+        author: v.string(),
+        created_utc: v.number(),
+        ups: v.number(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    if (args.comments.length === 0) return { inserted: 0 };
+
+    // Get the story once (all comments are from same post)
+    const postId = args.comments[0].postId;
+    const story = await ctx.db
+      .query("scamStories")
+      .withIndex("by_subreddit")
+      .filter((q) => q.eq(q.field("postId"), postId))
+      .first();
+
+    if (!story) {
+      console.error(`Story not found for postId: ${postId}`);
+      return { inserted: 0 };
+    }
+
+    // Get all existing comment IDs for this story
+    const existingComments = await ctx.db
+      .query("scamComments")
+      .withIndex("by_story")
+      .filter((q) => q.eq(q.field("storyId"), story._id))
+      .take(1000);
+
+    const existingIds = new Set(existingComments.map((c) => c.redditCommentId));
+
+    // Insert only new comments
+    let inserted = 0;
+    for (const comment of args.comments) {
+      if (!existingIds.has(comment.id)) {
+        await ctx.db.insert("scamComments", {
+          storyId: story._id,
+          redditCommentId: comment.id,
+          authorUsername: comment.author,
+          content: comment.body,
+          upvotes: comment.ups,
+          isHelpful: false,
+          containsAdvice: false,
+          postedAt: comment.created_utc * 1000,
+        });
+        inserted++;
+      }
+    }
+
+    return { inserted };
   },
 });
 
@@ -406,13 +513,35 @@ export const testFetch = action({
   },
 });
 
+// Test fetch comments for a single post
+export const testFetchComments = action({
+  args: {
+    postId: v.string(),
+    subreddit: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ success: boolean; message: string }> => {
+    console.log(`Testing comment fetch for postId: ${args.postId}, subreddit: ${args.subreddit}`);
+
+    try {
+      await fetchPostComments(ctx, args.postId, args.subreddit);
+      return { success: true, message: "Comments fetched successfully" };
+    } catch (error) {
+      console.error("Test failed:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  },
+});
+
 // ============= JOB MANAGEMENT =============
 
 // Stop all running jobs
 export const stopAllJobs = mutation({
   args: {},
   handler: async (ctx) => {
-    const jobs = await ctx.db.query("redditFetchJobs").collect();
+    const jobs = await ctx.db.query("redditFetchJobs").take(100);
     let stopped = 0;
 
     for (const job of jobs) {
@@ -434,7 +563,8 @@ export const stopAllJobs = mutation({
 export const getJobStats = query({
   args: {},
   handler: async (ctx) => {
-    const jobs = await ctx.db.query("redditFetchJobs").collect();
+    // Use take() instead of collect() to avoid loading all jobs
+    const jobs = await ctx.db.query("redditFetchJobs").take(100);
 
     const stats = {
       total: jobs.length,
@@ -458,13 +588,25 @@ export const getJobStats = query({
 export const clearJobHistory = mutation({
   args: {},
   handler: async (ctx) => {
-    const jobs = await ctx.db.query("redditFetchJobs").collect();
+    // Use pagination to delete all jobs safely
+    let deleted = 0;
+    let hasMore = true;
 
-    for (const job of jobs) {
-      await ctx.db.delete(job._id);
+    while (hasMore) {
+      const jobs = await ctx.db.query("redditFetchJobs").take(100);
+
+      if (jobs.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const job of jobs) {
+        await ctx.db.delete(job._id);
+        deleted++;
+      }
     }
 
-    return { success: true, deletedJobs: jobs.length };
+    return { success: true, deletedJobs: deleted };
   },
 });
 
@@ -533,7 +675,7 @@ export const fetchBatch = action({
   handler: async (ctx, args): Promise<{ success: boolean; processed: number; nextBatch: number; totalPosts: number }> => {
     const batch = args.batchNumber || 0;
     const size = args.batchSize || 5;
-    const limit = args.postsPerKeyword || 100; // Default 100 posts per keyword (Reddit max)
+    const limit = args.postsPerKeyword || 100; // Default 100 posts (Reddit API max per request)
 
     const totalCombinations = SUBREDDITS.length * REDDIT_KEYWORDS.length;
     const startIdx = batch * size;
@@ -545,8 +687,16 @@ export const fetchBatch = action({
 
     let processed = 0;
     let totalPosts = 0;
+    const startTime = Date.now();
+    const MAX_RUNTIME = 9 * 60 * 1000; // 9 minutes (leave 1 min buffer before timeout)
 
     for (let i = startIdx; i < endIdx; i++) {
+      // Check if approaching timeout
+      if (Date.now() - startTime > MAX_RUNTIME) {
+        console.log(`⏱ Approaching timeout after ${processed} combinations. Stopping batch.`);
+        break;
+      }
+
       const subIdx = Math.floor(i / REDDIT_KEYWORDS.length);
       const keyIdx = i % REDDIT_KEYWORDS.length;
       const subreddit = SUBREDDITS[subIdx];
@@ -558,7 +708,8 @@ export const fetchBatch = action({
         const result = await ctx.runAction(internal.reddit.fetchRedditPosts, {
           subreddit,
           keyword,
-          limit, // Use the configurable limit
+          limit,
+          skipComments: true, // SKIP COMMENTS for now to avoid timeout
         });
 
         const postsCount = result.postsProcessed || 0;
@@ -566,9 +717,8 @@ export const fetchBatch = action({
         console.log(`Got ${postsCount} posts for ${subreddit}/${keyword}`);
         processed++;
 
-        // Longer delay for larger fetches
-        const delay = limit > 50 ? 5000 : 3000;
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        // No delay between combinations - go fast
+        await new Promise((resolve) => setTimeout(resolve, 500));
       } catch (error) {
         console.error(`Batch ${batch} error for ${subreddit}/${keyword}:`, error);
       }
@@ -606,5 +756,194 @@ export const fetchAllForKeyword = action({
       console.error(`Error fetching ${args.subreddit}/${args.keyword}:`, error);
       return { success: false, postsProcessed: 0 };
     }
+  },
+});
+
+// ============= COMMENTS FETCHING (SEPARATE) =============
+
+// Get stories that need comments fetched
+export const getStoriesNeedingComments = internalQuery({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit || 50;
+
+    // Get stories
+    const stories = await ctx.db.query("scamStories").take(200);
+
+    // Get ALL comments in one query to avoid N+1 problem
+    const allComments = await ctx.db.query("scamComments").take(10000);
+
+    // Build a Set of story IDs that already have comments
+    const storiesWithComments = new Set(allComments.map((c) => c.storyId));
+
+    // Filter stories that don't have comments yet
+    const needingComments = stories
+      .filter((story) => !storiesWithComments.has(story._id))
+      .slice(0, limit)
+      .map((story) => ({
+        _id: story._id,
+        postId: story.postId,
+        subreddit: story.subreddit,
+        num_comments: story.num_comments || 0,
+        title: story.title,
+      }));
+
+    return needingComments;
+  },
+});
+
+// Public query to list posts needing comments (for debugging)
+export const listPostsNeedingComments = query({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit || 10;
+
+    // Get stories
+    const stories = await ctx.db.query("scamStories").take(100);
+
+    // Get ALL comments in one query
+    const allComments = await ctx.db.query("scamComments").take(5000);
+
+    // Build a Set of story IDs that already have comments
+    const storiesWithComments = new Set(allComments.map((c) => c.storyId));
+
+    // Filter stories that don't have comments yet
+    const needingComments = stories
+      .filter((story) => !storiesWithComments.has(story._id))
+      .filter((story) => story.num_comments && story.num_comments > 0) // Only posts with actual comments
+      .slice(0, limit)
+      .map((story) => ({
+        postId: story.postId,
+        subreddit: story.subreddit,
+        num_comments: story.num_comments || 0,
+        title: story.title.substring(0, 80),
+      }));
+
+    return needingComments;
+  },
+});
+
+// Fetch comments for existing posts (Phase 2)
+export const fetchCommentsForExistingPosts = action({
+  args: {
+    limit: v.optional(v.number()),
+    maxCommentsPerPost: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    success: boolean;
+    postsProcessed: number;
+    commentsFetched: number;
+    errors: number;
+  }> => {
+    const limit = args.limit || 20; // Process 20 posts at a time
+    const maxComments = args.maxCommentsPerPost || 200; // Skip posts with >200 comments
+
+    console.log(`Fetching comments for up to ${limit} posts...`);
+
+    // Get posts that need comments
+    const stories = await ctx.runQuery(internal.reddit.getStoriesNeedingComments, { limit });
+
+    if (stories.length === 0) {
+      console.log("No posts need comments fetching");
+      return { success: true, postsProcessed: 0, commentsFetched: 0, errors: 0 };
+    }
+
+    console.log(`Found ${stories.length} posts needing comments`);
+
+    let postsProcessed = 0;
+    let totalComments = 0;
+    let errors = 0;
+    const startTime = Date.now();
+    const MAX_RUNTIME = 8 * 60 * 1000; // 8 minutes max
+
+    for (const story of stories) {
+      // Check timeout
+      if (Date.now() - startTime > MAX_RUNTIME) {
+        console.log(`⏱ Approaching timeout. Processed ${postsProcessed} posts.`);
+        break;
+      }
+
+      // Skip posts with too many comments
+      const numComments = story.num_comments || 0;
+      if (numComments > maxComments) {
+        console.log(`⊘ Skipping "${story.title.substring(0, 50)}" (${numComments} comments, too many)`);
+        continue;
+      }
+
+      console.log(
+        `[${postsProcessed + 1}/${stories.length}] Fetching ${numComments} comments for: ${story.title.substring(0, 50)}...`,
+      );
+
+      try {
+        // Fetch comments for this post
+        const commentsBefore = await ctx.runQuery(internal.reddit.getCommentCountForPost, {
+          storyId: story._id,
+        });
+
+        console.log(`  Fetching comments for postId: ${story.postId}, subreddit: ${story.subreddit}`);
+
+        await fetchPostComments(ctx, story.postId, story.subreddit);
+
+        const commentsAfter = await ctx.runQuery(internal.reddit.getCommentCountForPost, {
+          storyId: story._id,
+        });
+
+        const newComments = commentsAfter - commentsBefore;
+        totalComments += newComments;
+        postsProcessed++;
+
+        console.log(`  ✓ Fetched ${newComments} comments`);
+
+        // Delay to respect rate limits
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      } catch (error) {
+        console.error(`  ✗ Failed to fetch comments for postId ${story.postId}:`, error);
+        console.error(`  ✗ Error type: ${error instanceof Error ? error.name : typeof error}`);
+        console.error(`  ✗ Error message: ${error instanceof Error ? error.message : String(error)}`);
+        errors++;
+
+        // If rate limited, wait longer
+        if (error instanceof Error && error.message.includes("429")) {
+          console.log("  ⏸ Rate limited, waiting 60 seconds...");
+          await new Promise((resolve) => setTimeout(resolve, 60000));
+        } else {
+          // Wait a bit before continuing
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+      }
+    }
+
+    console.log(`✅ Complete: ${postsProcessed} posts, ${totalComments} comments fetched, ${errors} errors`);
+
+    return {
+      success: true,
+      postsProcessed,
+      commentsFetched: totalComments,
+      errors,
+    };
+  },
+});
+
+// Helper: Get comment count for a post
+export const getCommentCountForPost = internalQuery({
+  args: {
+    storyId: v.id("scamStories"),
+  },
+  handler: async (ctx, args) => {
+    // Use take() for safety (a story typically has <100 comments)
+    const comments = await ctx.db
+      .query("scamComments")
+      .withIndex("by_story")
+      .filter((q) => q.eq(q.field("storyId"), args.storyId))
+      .take(1000);
+
+    return comments.length;
   },
 });

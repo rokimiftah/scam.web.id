@@ -261,10 +261,10 @@ export default function App() {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const countryColorMapRef = useRef<Record<string, string>>({});
 
-  // Fetch real scam data from Convex
-  const scamStories = useQuery(api.scams.getScamStories, { limit: 1000 }); // Increase limit to get all stories
-  const locationStats = useQuery(api.scams.getLocationStats, {});
-  const totalScamCount = useQuery(api.scams.getTotalScamCount, {}); // Use Convex query for accurate total
+  // Fetch real scam data from Convex - ONLY if authenticated
+  const scamStories = useQuery(api.scams.getScamStoriesForGlobe, isAuthenticated ? {} : "skip");
+  const locationStats = useQuery(api.scams.getAllLocationStats, isAuthenticated ? {} : "skip");
+  const totalScamCount = useQuery(api.scams.getTotalScamCount, isAuthenticated ? {} : "skip");
   const selectedStoryDetails = useQuery(api.scams.getScamStory, selectedStoryId ? { storyId: selectedStoryId } : "skip");
 
   // Action to send prevention tips email
@@ -334,40 +334,42 @@ export default function App() {
 
   // Convert scam stories to map points - GROUP BY COUNTRY
   const { points, highRiskCount, totalReportsFromVisualization } = useMemo(() => {
-    if (!isAuthenticated) return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
+    // Return empty if not authenticated OR data still loading
+    if (!isAuthenticated || !scamStories || !locationStats) {
+      return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
+    }
 
     // Create points for visualization (only for stories with coordinates)
     // Group stories by COUNTRY, not exact coordinates
     const countryGroups: Map<string, any[]> = new Map();
     const countryCoordinates: Map<string, { lat: number; lng: number }> = new Map();
 
-    // Process stories with coordinates for map visualization
-    if (scamStories) {
-      scamStories
-        .filter(
-          (story: any) =>
-            story.isProcessed &&
-            story.coordinates?.lat &&
-            story.coordinates?.lng &&
-            story.country !== "Unknown" &&
-            story.country !== "Multiple European Countries" &&
-            story.country !== "Multiple Countries",
-        )
-        .forEach((story: any) => {
-          const { lat, lng } = story.coordinates;
-          const countryKey = story.country;
+    // Process stories with coordinates for map visualization  
+    if (scamStories && scamStories.length > 0) {
+      const storiesWithCoords = scamStories.filter(
+        (story: any) =>
+          story.coordinates?.lat &&
+          story.coordinates?.lng &&
+          story.country !== "Unknown" &&
+          story.country !== "Multiple European Countries" &&
+          story.country !== "Multiple Countries",
+      );
 
-          // Add story to country group
-          if (!countryGroups.has(countryKey)) {
-            countryGroups.set(countryKey, []);
-            countryCoordinates.set(countryKey, { lat, lng });
-          }
-          countryGroups.get(countryKey)!.push(story);
-        });
+      storiesWithCoords.forEach((story: any) => {
+        const { lat, lng } = story.coordinates;
+        const countryKey = story.country;
+
+        // Add story to country group
+        if (!countryGroups.has(countryKey)) {
+          countryGroups.set(countryKey, []);
+          countryCoordinates.set(countryKey, { lat, lng });
+        }
+        countryGroups.get(countryKey)!.push(story);
+      });
     }
 
     // Add location stats with coordinates for visualization
-    if (locationStats) {
+    if (locationStats && locationStats.length > 0) {
       const statsByCountry: Map<string, any[]> = new Map();
 
       locationStats
@@ -403,6 +405,7 @@ export default function App() {
               .join(", "),
             coordinates: primaryStat.coordinates,
             scamType: primaryStat.topScamTypes?.[0]?.type || "other",
+            scamMethods: primaryStat.topScamTypes?.map((t: any) => t.type) || [],
             title: `${totalScamsFromStats} scams reported`,
             summary: `${totalScamsFromStats} scams from comment reports across ${stats.length} locations`,
             isFromStats: true,
@@ -766,10 +769,11 @@ export default function App() {
 
           {/* Content Area */}
           <div className="no-scrollbar relative flex flex-1 flex-col overflow-y-auto" style={{ backgroundColor: "transparent" }}>
-            {/* Voice Assistant Interface */}
-            <VoiceAssistantIntegrated
-              ref={voiceAssistantRef}
-              isAuthenticated={isAuthenticated}
+            {/* Voice Assistant Interface - Only render if NOT loading */}
+            {!isAuthLoading && (
+              <VoiceAssistantIntegrated
+                ref={voiceAssistantRef}
+                isAuthenticated={isAuthenticated}
               onLocationQuery={(country) => {
                 // Country name aliases mapping
                 const countryAliases: Record<string, string[]> = {
@@ -888,7 +892,8 @@ export default function App() {
                 }
               }}
               onSessionActiveChange={(active) => setIsVoiceActive(active)}
-            />
+              />
+            )}
 
             {/* Offer to email prevention tips at voice session end */}
             {showEmailOffer && lastVapiCountry && (
@@ -1534,7 +1539,7 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">Total Scams</p>
                   <p className="mt-1 text-xl font-extralight text-white/90">
-                    {isAuthLoading ? "..." : isAuthenticated ? totalScamCount || 0 : 0}
+                    {isAuthLoading || totalScamCount === undefined ? "..." : totalScamCount}
                   </p>
                   <div className="absolute top-3 right-3">
                     <svg className="h-3 w-3 text-blue-400/30" fill="currentColor" viewBox="0 0 20 20">
@@ -1554,7 +1559,7 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">High Risk</p>
                   <p className="mt-1 text-xl font-extralight text-red-400">
-                    {isAuthLoading ? "..." : isAuthenticated ? highRiskCount : 0}
+                    {isAuthLoading || !scamStories ? "..." : highRiskCount}
                   </p>
                   <div className="absolute top-3 right-3">
                     <svg className="h-3 w-3 text-red-400/30" fill="currentColor" viewBox="0 0 20 20">
@@ -1573,13 +1578,9 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">Reports</p>
                   <p className="mt-1 text-xl font-extralight text-green-400">
-                    {isAuthLoading
+                    {isAuthLoading || !scamStories || !locationStats
                       ? "..."
-                      : isAuthenticated
-                        ? totalReportsFromVisualization > 0
-                          ? totalReportsFromVisualization
-                          : points.reduce((sum, p) => sum + p.reports, 0)
-                        : 0}
+                      : totalReportsFromVisualization || points.reduce((sum, p) => sum + p.reports, 0)}
                   </p>
                   <div className="absolute top-3 right-3">
                     <svg className="h-3 w-3 text-green-400/30" fill="currentColor" viewBox="0 0 20 20">

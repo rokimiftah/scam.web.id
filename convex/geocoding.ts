@@ -286,10 +286,14 @@ function buildLocationQuery(country: string, city?: string): string {
   return "";
 }
 
-// Update all stories with coordinates using Mapbox
+// DEPRECATED: Use aiAnalyzer.analyzeScamStory which geocodes automatically
+// Only use this for emergency fixes of missing coordinates
 export const addCoordinatesToStories = action({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<{ success: boolean; updated: number; total: number; errors: number }> => {
+    console.warn("⚠️ DEPRECATED: addCoordinatesToStories should only be used for emergency fixes.");
+    console.warn("   Normal flow: aiAnalyzer.analyzeScamStory geocodes automatically.");
+
     const limit = args.limit || 50;
 
     const stories: any[] = await ctx.runQuery(internal.geocoding.getStoriesWithoutCoordinates, { limit });
@@ -562,10 +566,14 @@ export const regeocodeAllStories = action({
   },
 });
 
-// Normalize existing processed stories: update coordinates and canonical country/city using Mapbox
+// DEPRECATED: Use aiAnalyzer.analyzeScamStory which normalizes locations automatically
+// Only use this for batch fixing of existing bad data
 export const normalizeStoryLocations = action({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<{ success: boolean; checked: number; updated: number; errors: number }> => {
+    console.warn("⚠️ DEPRECATED: normalizeStoryLocations should only be used for batch fixes.");
+    console.warn("   Normal flow: aiAnalyzer.analyzeScamStory normalizes locations automatically.");
+
     const limit = args.limit || 50;
     // Get processed stories that have country or city info
     const stories: any[] = await ctx.runQuery(internal.geocoding.getProcessedStories, { limit });

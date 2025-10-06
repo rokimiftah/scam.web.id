@@ -4,43 +4,49 @@ import { v } from "convex/values";
 
 import { internalQuery, mutation, query } from "./_generated/server";
 
-// Get total scam count (stories + scams from comments)
+// Get total scam count (all processed scam stories)
 export const getTotalScamCount = query({
   args: {},
   handler: async (ctx) => {
-    // Count processed stories (these are the main scam posts)
+    // Use collect() which handles pagination internally with single paginated query
     const stories = await ctx.db
       .query("scamStories")
-      .filter((q) => q.eq(q.field("isProcessed"), true))
+      .withIndex("by_processed", (q) => q.eq("isProcessed", true))
       .collect();
 
-    // Get location stats
-    const locationStats = await ctx.db.query("locationStats").collect();
+    return stories.length;
+  },
+});
 
-    // The problem: locationStats might not include all stories
-    // Solution: Count stories as the base, then ADD extra scams from comments
+// Get lightweight data for globe visualization - only essential fields
+export const getScamStoriesForGlobe = query({
+  args: {},
+  handler: async (ctx) => {
+    // Use collect() to get all stories with single paginated query
+    const allStories = await ctx.db
+      .query("scamStories")
+      .withIndex("by_processed", (q) => q.eq("isProcessed", true))
+      .collect();
 
-    // Group stories by location to get expected counts
-    const storyCountsByLocation = new Map<string, number>();
-    for (const story of stories) {
-      const key = `${story.city || "Unknown"}:::${story.country}`;
-      storyCountsByLocation.set(key, (storyCountsByLocation.get(key) || 0) + 1);
-    }
-
-    // Calculate additional scams from comments
-    let additionalScamsFromComments = 0;
-    for (const stat of locationStats) {
-      const key = `${stat.city || "Unknown"}:::${stat.country}`;
-      const expectedFromStories = storyCountsByLocation.get(key) || 0;
-
-      // If locationStats has MORE than expected, those are comment scams
-      if (stat.totalScams > expectedFromStories) {
-        additionalScamsFromComments += stat.totalScams - expectedFromStories;
-      }
-    }
-
-    // Total = all processed stories + additional scams found in comments
-    return stories.length + additionalScamsFromComments;
+    // Only extract essential fields for visualization
+    return allStories.map((story) => ({
+      _id: story._id,
+      country: story.country,
+      city: story.city,
+      coordinates: story.coordinates,
+      scamType: story.scamType,
+      scamMethods: story.scamMethods,
+      title: story.title,
+      summary: story.summary,
+      postDate: story.postDate,
+      upvotes: story.upvotes,
+      moneyLost: story.moneyLost,
+      currency: story.currency,
+      redditUrl: story.redditUrl,
+      warningSignals: story.warningSignals,
+      preventionTips: story.preventionTips,
+      authorUsername: story.authorUsername,
+    }));
   },
 });
 
@@ -76,37 +82,40 @@ export const getScamStories = query({
   handler: async (ctx, args) => {
     const { country, scamType, verificationStatus, limit = 50, sortBy = "date" } = args;
 
-    const query = ctx.db.query("scamStories");
+    let query = ctx.db.query("scamStories").withIndex("by_processed", (q) => q.eq("isProcessed", true));
 
-    // Get all stories first, then filter
-    const allStories = await query.take(1000);
-
-    let filteredStories = allStories.filter((s) => s.isProcessed);
-
+    // Apply filters using indexes where possible
     if (country) {
-      filteredStories = filteredStories.filter((s) => s.country === country);
+      query = ctx.db
+        .query("scamStories")
+        .withIndex("by_country", (q) => q.eq("country", country))
+        .filter((q) => q.eq(q.field("isProcessed"), true));
+    } else if (scamType) {
+      query = ctx.db
+        .query("scamStories")
+        .withIndex("by_type", (q) => q.eq("scamType", scamType))
+        .filter((q) => q.eq(q.field("isProcessed"), true));
     }
 
-    if (scamType) {
-      filteredStories = filteredStories.filter((s) => s.scamType === scamType);
-    }
+    // Take more than needed for sorting, but not all
+    const fetchLimit = Math.min(limit * 10, 500);
+    let stories = await query.order("desc").take(fetchLimit);
 
+    // Apply additional filters in memory
     if (verificationStatus) {
-      filteredStories = filteredStories.filter((s) => s.verificationStatus === verificationStatus);
+      stories = stories.filter((s) => s.verificationStatus === verificationStatus);
     }
 
     // Apply sorting
     if (sortBy === "date") {
-      filteredStories.sort((a, b) => b.postDate - a.postDate);
+      stories.sort((a, b) => b.postDate - a.postDate);
     } else if (sortBy === "upvotes") {
-      filteredStories.sort((a, b) => b.upvotes - a.upvotes);
+      stories.sort((a, b) => b.upvotes - a.upvotes);
     } else if (sortBy === "views") {
-      filteredStories.sort((a, b) => b.viewCount - a.viewCount);
+      stories.sort((a, b) => b.viewCount - a.viewCount);
     }
 
-    const stories = filteredStories.slice(0, limit);
-
-    return stories;
+    return stories.slice(0, limit);
   },
 });
 
@@ -175,6 +184,20 @@ export const searchScamStories = query({
   },
 });
 
+// Get ALL location statistics for globe visualization
+export const getAllLocationStats = query({
+  args: {},
+  handler: async (ctx) => {
+    // Use collect() for single paginated query
+    const allStats = await ctx.db.query("locationStats").collect();
+
+    // Sort by total scams
+    allStats.sort((a, b) => b.totalScams - a.totalScams);
+
+    return allStats;
+  },
+});
+
 // Get location statistics
 export const getLocationStats = query({
   args: {
@@ -182,14 +205,14 @@ export const getLocationStats = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { country } = args;
+    const { country, limit = 100 } = args;
 
-    const allStats = await ctx.db.query("locationStats").take(100);
-
-    let stats = allStats;
-    if (country) {
-      stats = stats.filter((s) => s.country === country);
-    }
+    const stats = country
+      ? await ctx.db
+          .query("locationStats")
+          .withIndex("by_country", (q) => q.eq("country", country))
+          .take(limit)
+      : await ctx.db.query("locationStats").order("desc").take(limit);
 
     // Sort by total scams
     stats.sort((a, b) => b.totalScams - a.totalScams);
@@ -243,47 +266,26 @@ export const getTrendingScams = query({
 export const getScamTypeStats = query({
   args: {},
   handler: async (ctx) => {
-    const scamTypes = [
-      "taxi",
-      "accommodation",
-      "tour",
-      "police",
-      "atm",
-      "restaurant",
-      "shopping",
-      "visa",
-      "airport",
-      "pickpocket",
-      "romance",
-      "timeshare",
-      "fake_ticket",
-      "currency_exchange",
-      "other",
-    ] as const;
+    // Fetch all processed stories once (single paginated query)
+    const allStories = await ctx.db
+      .query("scamStories")
+      .withIndex("by_processed", (q) => q.eq("isProcessed", true))
+      .collect();
 
-    const stats = await Promise.all(
-      scamTypes.map(async (type) => {
-        const count = await ctx.db
-          .query("scamStories")
-          .withIndex("by_type")
-          .filter((q) => q.and(q.eq(q.field("scamType"), type), q.eq(q.field("isProcessed"), true)))
-          .collect()
-          .then((stories) => stories.length);
+    // Count in memory
+    const typeCounts = new Map<string, number>();
 
-        return {
-          type,
-          count,
-          percentage: 0, // Will calculate after
-        };
-      }),
-    );
-
-    const total = stats.reduce((sum, stat) => sum + stat.count, 0);
-
-    // Calculate percentages
-    stats.forEach((stat) => {
-      stat.percentage = total > 0 ? (stat.count / total) * 100 : 0;
+    allStories.forEach((story) => {
+      const count = typeCounts.get(story.scamType) || 0;
+      typeCounts.set(story.scamType, count + 1);
     });
+
+    const total = allStories.length;
+    const stats = Array.from(typeCounts.entries()).map(([type, count]) => ({
+      type,
+      count,
+      percentage: total > 0 ? (count / total) * 100 : 0,
+    }));
 
     // Sort by count
     stats.sort((a, b) => b.count - a.count);
@@ -440,6 +442,6 @@ export const getScamStoriesForCountry = internalQuery({
       .query("scamStories")
       .withIndex("by_country", (q) => q.eq("country", country))
       .filter((q) => q.eq(q.field("isProcessed"), true))
-      .collect();
+      .take(100); // Limit to avoid memory issues
   },
 });

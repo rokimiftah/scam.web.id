@@ -26,7 +26,8 @@ export const verifyEmail = mutation({
 export const getInternalUserByToken = internalQuery({
   args: { tokenIdentifier: v.string() },
   handler: async (ctx, { tokenIdentifier }) => {
-    const accounts = await ctx.db.query("authAccounts").collect();
+    // Use take() instead of collect() to limit memory usage
+    const accounts = await ctx.db.query("authAccounts").take(1000);
     const account = accounts.find((a) => (a as any).tokenIdentifier === tokenIdentifier);
     if (!account) return null;
     return await ctx.db.get(account.userId);
@@ -83,10 +84,11 @@ export const checkUserProvider = query({
     if (!user) {
       return null;
     }
+    // A user typically has 1-3 auth accounts, so take(10) is safe
     const accounts = await ctx.db
       .query("authAccounts")
       .filter((q) => q.eq(q.field("userId"), user._id))
-      .collect();
+      .take(10);
     const providers = accounts.map((account) => account.provider);
     return providers;
   },

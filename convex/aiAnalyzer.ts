@@ -4,7 +4,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 import { api, internal } from "./_generated/api";
-import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, query } from "./_generated/server";
 
 // OpenAI-compatible LLM configuration
 const LLM_API_URL = process.env.LLM_API_URL as string;
@@ -40,6 +40,11 @@ export const analyzeScamStory = internalAction({
     if (!story || story.isProcessed) {
       return { success: false, message: "Story not found or already processed" };
     }
+
+    // Track that we're starting a processing attempt
+    await ctx.runMutation(internal.aiAnalyzer.markProcessingAttempt, {
+      storyId: args.storyId,
+    });
 
     try {
       // Get comments for additional context
@@ -408,6 +413,22 @@ export const markAsNotScam = internalMutation({
   },
 });
 
+export const markProcessingAttempt = internalMutation({
+  args: {
+    storyId: v.id("scamStories"),
+  },
+  handler: async (ctx, args) => {
+    const story = await ctx.db.get(args.storyId);
+    if (story) {
+      const attempts = (story.processingAttempts || 0) + 1;
+      await ctx.db.patch(args.storyId, {
+        processingAttempts: attempts,
+        lastAttemptAt: Date.now(),
+      });
+    }
+  },
+});
+
 export const markProcessingError = internalMutation({
   args: {
     storyId: v.id("scamStories"),
@@ -720,32 +741,145 @@ export const getUnprocessedStories = internalQuery({
 export const getAllUnprocessedStories = internalQuery({
   args: {},
   handler: async (ctx) => {
-    // Get ALL unprocessed stories without any limit
+    // Get unprocessed stories with reasonable limit
     return await ctx.db
       .query("scamStories")
       .filter((q) => q.eq(q.field("isProcessed"), false))
-      .collect(); // Use collect() instead of take() to get all
+      .take(100); // Limit to avoid memory issues
   },
 });
 
 export const getUnprocessedStoriesBatch = internalQuery({
   args: { limit: v.number() },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const MAX_ATTEMPTS = 3;
+    const stories = await ctx.db
       .query("scamStories")
       .filter((q) => q.eq(q.field("isProcessed"), false))
-      .take(args.limit);
+      .take(args.limit * 3); // Get more to account for filtering
+
+    // Filter out stories with too many failed attempts
+    const filtered = stories.filter((story) => {
+      const attempts = story.processingAttempts || 0;
+      return attempts < MAX_ATTEMPTS;
+    });
+
+    return filtered.slice(0, args.limit);
+  },
+});
+
+// Orchestration: Run full pipeline from fetching to analysis
+export const runFullPipeline = action({
+  args: {
+    fetchPosts: v.optional(v.boolean()),
+    storiesBatchSize: v.optional(v.number()),
+    commentsBatchSize: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    success: boolean;
+    fetched: number;
+    storiesAnalyzed: number;
+    storiesErrors: number;
+    commentsAnalyzed: number;
+    scamsFromComments: number;
+  }> => {
+    const result = {
+      fetched: 0,
+      storiesAnalyzed: 0,
+      storiesErrors: 0,
+      commentsAnalyzed: 0,
+      scamsFromComments: 0,
+    };
+
+    console.log("Starting full pipeline...");
+
+    // Step 1: Fetch new posts (optional)
+    if (args.fetchPosts) {
+      console.log("Step 1: Fetching new Reddit posts...");
+      try {
+        const fetch = await ctx.runAction(api.reddit.fetchBatch, {
+          batchNumber: 0,
+          batchSize: 5,
+        });
+        result.fetched = fetch.totalPosts || 0;
+        console.log(`✓ Fetched ${result.fetched} new posts`);
+      } catch (error) {
+        console.error("✗ Failed to fetch posts:", error);
+      }
+    }
+
+    // Step 2: Process unanalyzed stories with AI
+    console.log("Step 2: Analyzing unprocessed stories...");
+    try {
+      const analyze = await ctx.runAction(api.aiAnalyzer.processUnanalyzedStoriesBatch, {
+        limit: args.storiesBatchSize || 10,
+      });
+      result.storiesAnalyzed = analyze.processed;
+      result.storiesErrors = analyze.errors;
+      console.log(`✓ Analyzed ${result.storiesAnalyzed} stories (${result.storiesErrors} errors)`);
+    } catch (error) {
+      console.error("✗ Failed to analyze stories:", error);
+    }
+
+    // Step 3: Analyze comments for additional scams
+    console.log("Step 3: Analyzing comments for hidden scams...");
+    try {
+      const comments = await ctx.runAction(api.aiAnalyzer.analyzeCommentsForScams, {
+        limit: args.commentsBatchSize || 5,
+      });
+      result.commentsAnalyzed = comments.analyzed;
+      result.scamsFromComments = comments.scamsFound;
+      console.log(`✓ Analyzed ${result.commentsAnalyzed} comments, found ${result.scamsFromComments} new scams`);
+    } catch (error) {
+      console.error("✗ Failed to analyze comments:", error);
+    }
+
+    console.log("Pipeline complete!");
+    return { success: true, ...result };
   },
 });
 
 export const getUnprocessedStoriesCount = internalQuery({
   args: {},
   handler: async (ctx) => {
+    // Use collect() for single paginated query
     const stories = await ctx.db
       .query("scamStories")
       .filter((q) => q.eq(q.field("isProcessed"), false))
       .collect();
+
     return stories.length;
+  },
+});
+
+// Get stories that failed processing multiple times
+export const getFailedStories = query({
+  args: {
+    minAttempts: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { minAttempts = 3, limit = 20 }) => {
+    const stories = await ctx.db
+      .query("scamStories")
+      .filter((q) => q.eq(q.field("isProcessed"), false))
+      .take(100);
+
+    const failed = stories
+      .filter((s) => (s.processingAttempts || 0) >= minAttempts)
+      .slice(0, limit)
+      .map((s) => ({
+        _id: s._id,
+        title: s.title.substring(0, 80),
+        subreddit: s.subreddit,
+        attempts: s.processingAttempts || 0,
+        lastAttempt: s.lastAttemptAt,
+        errors: s.processingErrors || [],
+      }));
+
+    return failed;
   },
 });
 
@@ -972,16 +1106,14 @@ export const analyzeCommentsForScams = action({
 export const getProcessedStoriesForCommentAnalysis = internalQuery({
   args: { limit: v.number() },
   handler: async (ctx, args) => {
-    // Get ALL processed stories - use collect() to get all then slice
-    const allStories = await ctx.db
+    // Use indexed query and take only what's needed
+    const stories = await ctx.db
       .query("scamStories")
-      .filter((q) => q.eq(q.field("isProcessed"), true))
-      .collect();
+      .withIndex("by_processed", (q) => q.eq("isProcessed", true))
+      .order("desc")
+      .take(args.limit);
 
-    // Return requested limit
-    const stories = allStories.slice(0, args.limit);
-
-    console.log(`getProcessedStoriesForCommentAnalysis: Returning ${stories.length} of ${allStories.length} total stories`);
+    console.log(`getProcessedStoriesForCommentAnalysis: Returning ${stories.length} stories`);
     return stories;
   },
 });
@@ -1031,9 +1163,8 @@ export const getAllProcessedStories = internalQuery({
   handler: async (ctx) => {
     return await ctx.db
       .query("scamStories")
-      .filter((q) => q.eq(q.field("isProcessed"), true))
-      // Removed filter for Unknown country
-      .collect(); // Get all, not limited
+      .withIndex("by_processed", (q) => q.eq("isProcessed", true))
+      .take(500); // Limit to avoid memory issues
   },
 });
 
@@ -1165,7 +1296,9 @@ export const getCommentAnalysisStats = action({
 export const getAllComments = internalQuery({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("scamComments").collect();
+    // Use pagination to count comments efficiently
+    const comments = await ctx.db.query("scamComments").take(1000);
+    return comments;
   },
 });
 
@@ -1227,7 +1360,7 @@ export const sendPreventionTips = action({
 
     const stories = await ctx.runQuery(internal.scams.getScamStoriesForCountry, { country });
 
-    const preventionTips = [...new Set(stories.flatMap((story) => story.preventionTips || []))];
+    const preventionTips = [...new Set(stories.flatMap((story: any) => story.preventionTips || []))];
 
     if (preventionTips.length === 0) {
       console.log(`No prevention tips found for ${country}. Sending generic email.`);
@@ -1324,5 +1457,108 @@ Rules:
       console.error("Error cleaning transcript with LLM:", error);
       return { cleaned: transcript };
     }
+  },
+});
+
+// Public wrapper to fix locationStats coordinates
+export const fixLocationStats = action({
+  args: {},
+  handler: async (ctx): Promise<{ total: number; updated: number; failed: number }> => {
+    return await ctx.runAction(internal.aiAnalyzer.fixLocationStatsCoordinates);
+  },
+});
+
+// Fix locationStats that don't have coordinates by getting coordinates from scamStories
+export const fixLocationStatsCoordinates = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ total: number; updated: number; failed: number }> => {
+    // Get all locationStats without coordinates
+    const allStats: any[] = await ctx.runQuery(internal.aiAnalyzer.getLocationStatsWithoutCoordinates);
+
+    console.log(`Found ${allStats.length} locationStats without coordinates`);
+
+    let updated = 0;
+    let failed = 0;
+
+    for (const stat of allStats) {
+      try {
+        // Find a scamStory with coordinates for this country/city
+        const story = await ctx.runQuery(internal.aiAnalyzer.findStoryWithCoordinates, {
+          country: stat.country,
+          city: stat.city || undefined,
+        });
+
+        if (story?.coordinates) {
+          // Update locationStats with coordinates
+          await ctx.runMutation(internal.aiAnalyzer.patchLocationStatsCoordinates, {
+            statsId: stat._id,
+            coordinates: story.coordinates,
+          });
+          updated++;
+          console.log(`Updated ${stat.country}${stat.city ? `, ${stat.city}` : ""} with coordinates`);
+        } else {
+          failed++;
+          console.log(`No story with coordinates found for ${stat.country}${stat.city ? `, ${stat.city}` : ""}`);
+        }
+      } catch (error) {
+        failed++;
+        console.error(`Failed to update ${stat.country}${stat.city ? `, ${stat.city}` : ""}:`, error);
+      }
+    }
+
+    return {
+      total: allStats.length,
+      updated,
+      failed,
+    };
+  },
+});
+
+export const getLocationStatsWithoutCoordinates = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const allStats = await ctx.db.query("locationStats").collect();
+    return allStats.filter((stat) => !stat.coordinates);
+  },
+});
+
+export const findStoryWithCoordinates = internalQuery({
+  args: {
+    country: v.string(),
+    city: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    // Try to find story with matching city first
+    if (args.city && args.city !== "Unknown") {
+      const story = await ctx.db
+        .query("scamStories")
+        .withIndex("by_country", (q) => q.eq("country", args.country))
+        .filter((q) => q.and(q.eq(q.field("city"), args.city), q.neq(q.field("coordinates"), undefined)))
+        .first();
+
+      if (story) return story;
+    }
+
+    // Otherwise find any story from the country with coordinates
+    return await ctx.db
+      .query("scamStories")
+      .withIndex("by_country", (q) => q.eq("country", args.country))
+      .filter((q) => q.neq(q.field("coordinates"), undefined))
+      .first();
+  },
+});
+
+export const patchLocationStatsCoordinates = internalMutation({
+  args: {
+    statsId: v.id("locationStats"),
+    coordinates: v.object({
+      lat: v.number(),
+      lng: v.number(),
+    }),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.statsId, {
+      coordinates: args.coordinates,
+    });
   },
 });

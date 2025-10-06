@@ -118,10 +118,10 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
     const lastTranscriptRef = useRef<{ role: string; text: string } | null>(null);
     const cleaningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Fetch data for the assistant to use
-    const scamStories = useQuery(api.scams.getScamStories, { limit: 100 });
-    const locationStats = useQuery(api.scams.getLocationStats, {});
-    const trendingScams = useQuery(api.scams.getTrendingScams, {});
+    // Fetch data for the assistant to use - ONLY if authenticated
+    const scamStories = useQuery(api.scams.getScamStories, isAuthenticated ? { limit: 100 } : "skip");
+    const locationStats = useQuery(api.scams.getLocationStats, isAuthenticated ? {} : "skip");
+    const trendingScams = useQuery(api.scams.getTrendingScams, isAuthenticated ? {} : "skip");
     const currentUser = useQuery(api.users.getCurrentUser);
     const sendPreventionTipsEmailAction = useAction(api.aiAnalyzer.sendPreventionTips);
     const cleanTranscriptAction = useAction(api.aiAnalyzer.cleanTranscript);
