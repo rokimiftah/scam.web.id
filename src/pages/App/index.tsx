@@ -109,6 +109,44 @@ const globalStyles = `
 		background-color: #15151a !important;
 	}
 
+	/* Loading dots animation */
+	.loading-dots {
+		display: inline-flex;
+		gap: 4px;
+		align-items: center;
+	}
+
+	.loading-dots span {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background-color: currentColor;
+		animation: dotPulse 1.4s infinite ease-in-out;
+	}
+
+	.loading-dots span:nth-child(1) {
+		animation-delay: 0s;
+	}
+
+	.loading-dots span:nth-child(2) {
+		animation-delay: 0.2s;
+	}
+
+	.loading-dots span:nth-child(3) {
+		animation-delay: 0.4s;
+	}
+
+	@keyframes dotPulse {
+		0%, 80%, 100% {
+			transform: scale(0);
+			opacity: 0.3;
+		}
+		40% {
+			transform: scale(1);
+			opacity: 1;
+		}
+	}
+
 	/* Enhanced loading animations */
 	@keyframes spin {
 		from { transform: rotate(0deg); }
@@ -344,7 +382,7 @@ export default function App() {
     const countryGroups: Map<string, any[]> = new Map();
     const countryCoordinates: Map<string, { lat: number; lng: number }> = new Map();
 
-    // Process stories with coordinates for map visualization  
+    // Process stories with coordinates for map visualization
     if (scamStories && scamStories.length > 0) {
       const storiesWithCoords = scamStories.filter(
         (story: any) =>
@@ -774,124 +812,124 @@ export default function App() {
               <VoiceAssistantIntegrated
                 ref={voiceAssistantRef}
                 isAuthenticated={isAuthenticated}
-              onLocationQuery={(country) => {
-                // Country name aliases mapping
-                const countryAliases: Record<string, string[]> = {
-                  "United States": ["America", "USA", "US", "United States of America"],
-                  "United Kingdom": ["UK", "Britain", "England", "Great Britain"],
-                  "South Korea": ["Korea", "Republic of Korea"],
-                  "North Korea": ["DPRK", "Democratic People's Republic of Korea"],
-                  Russia: ["Russian Federation"],
-                  China: ["People's Republic of China", "PRC"],
-                  Taiwan: ["Republic of China", "Chinese Taipei"],
-                  Vietnam: ["Viet Nam"],
-                  Myanmar: ["Burma"],
-                  "Czech Republic": ["Czechia"],
-                  Netherlands: ["Holland"],
-                  Switzerland: ["Swiss"],
-                  UAE: ["United Arab Emirates"],
-                  "Saudi Arabia": ["KSA", "Kingdom of Saudi Arabia"],
-                };
+                onLocationQuery={(country) => {
+                  // Country name aliases mapping
+                  const countryAliases: Record<string, string[]> = {
+                    "United States": ["America", "USA", "US", "United States of America"],
+                    "United Kingdom": ["UK", "Britain", "England", "Great Britain"],
+                    "South Korea": ["Korea", "Republic of Korea"],
+                    "North Korea": ["DPRK", "Democratic People's Republic of Korea"],
+                    Russia: ["Russian Federation"],
+                    China: ["People's Republic of China", "PRC"],
+                    Taiwan: ["Republic of China", "Chinese Taipei"],
+                    Vietnam: ["Viet Nam"],
+                    Myanmar: ["Burma"],
+                    "Czech Republic": ["Czechia"],
+                    Netherlands: ["Holland"],
+                    Switzerland: ["Swiss"],
+                    UAE: ["United Arab Emirates"],
+                    "Saudi Arabia": ["KSA", "Kingdom of Saudi Arabia"],
+                  };
 
-                // Function to find country by aliases
-                const findCountryWithAliases = (searchCountry: string) => {
-                  // Try direct matches first
-                  let point = points.find((p) => p.country === searchCountry);
-                  if (point) return point;
+                  // Function to find country by aliases
+                  const findCountryWithAliases = (searchCountry: string) => {
+                    // Try direct matches first
+                    let point = points.find((p) => p.country === searchCountry);
+                    if (point) return point;
 
-                  // Try case-insensitive
-                  point = points.find((p) => p.country.toLowerCase() === searchCountry.toLowerCase());
-                  if (point) return point;
+                    // Try case-insensitive
+                    point = points.find((p) => p.country.toLowerCase() === searchCountry.toLowerCase());
+                    if (point) return point;
 
-                  // Try aliases
-                  for (const [realCountry, aliases] of Object.entries(countryAliases)) {
-                    if (aliases.some((alias) => alias.toLowerCase() === searchCountry.toLowerCase())) {
-                      point = points.find((p) => p.country === realCountry);
-                      if (point) {
-                        return point;
-                      }
-                    }
-                  }
-
-                  // Try partial match
-                  point = points.find(
-                    (p) =>
-                      p.country.toLowerCase().includes(searchCountry.toLowerCase()) ||
-                      searchCountry.toLowerCase().includes(p.country.toLowerCase()),
-                  );
-                  if (point) return point;
-
-                  // Try reverse alias lookup (if database has alias but search is real name)
-                  point = points.find((p) => {
+                    // Try aliases
                     for (const [realCountry, aliases] of Object.entries(countryAliases)) {
-                      if (
-                        realCountry.toLowerCase() === searchCountry.toLowerCase() &&
-                        aliases.some((alias) => alias.toLowerCase() === p.country.toLowerCase())
-                      ) {
-                        return true;
+                      if (aliases.some((alias) => alias.toLowerCase() === searchCountry.toLowerCase())) {
+                        point = points.find((p) => p.country === realCountry);
+                        if (point) {
+                          return point;
+                        }
                       }
                     }
-                    return false;
-                  });
 
-                  return point;
-                };
+                    // Try partial match
+                    point = points.find(
+                      (p) =>
+                        p.country.toLowerCase().includes(searchCountry.toLowerCase()) ||
+                        searchCountry.toLowerCase().includes(p.country.toLowerCase()),
+                    );
+                    if (point) return point;
 
-                // Keep globe auto-rotation running even when focusing on location
+                    // Try reverse alias lookup (if database has alias but search is real name)
+                    point = points.find((p) => {
+                      for (const [realCountry, aliases] of Object.entries(countryAliases)) {
+                        if (
+                          realCountry.toLowerCase() === searchCountry.toLowerCase() &&
+                          aliases.some((alias) => alias.toLowerCase() === p.country.toLowerCase())
+                        ) {
+                          return true;
+                        }
+                      }
+                      return false;
+                    });
 
-                // Find the country point using improved matching
-                const point = findCountryWithAliases(country);
+                    return point;
+                  };
 
-                if (point && globeRef.current) {
-                  setSelected(point);
-                  setShowDetail(true);
-                  setSelectedStoryId(null);
-                  setLastVapiCountry(point.country);
+                  // Keep globe auto-rotation running even when focusing on location
 
-                  const cameraTransitionMs = 1200;
+                  // Find the country point using improved matching
+                  const point = findCountryWithAliases(country);
 
-                  // 🎯 VOICE-TRIGGERED: Stop rotation and highlight country immediately
-                  const controls = globeRef.current.controls();
-                  if (controls) {
-                    controls.autoRotate = false; // Stop rotation immediately
+                  if (point && globeRef.current) {
+                    setSelected(point);
+                    setShowDetail(true);
+                    setSelectedStoryId(null);
+                    setLastVapiCountry(point.country);
+
+                    const cameraTransitionMs = 1200;
+
+                    // 🎯 VOICE-TRIGGERED: Stop rotation and highlight country immediately
+                    const controls = globeRef.current.controls();
+                    if (controls) {
+                      controls.autoRotate = false; // Stop rotation immediately
+                    }
+
+                    // Set highlighted country for visual effect
+                    setVoiceHighlightedCountry(point.country);
+
+                    // Focus globe instantly (no animation)
+                    globeRef.current.pointOfView(
+                      {
+                        lat: point.lat,
+                        lng: point.lng,
+                        altitude: 1.2,
+                      },
+                      cameraTransitionMs,
+                    );
+                  } else {
+                    setShowDetail(false);
+                    setSelected(null);
+                    console.warn("🌍 App: Could not find point for country:", country);
+                    console.warn("🌍 App: Available countries:", points.map((p) => p.country).sort());
+                    console.warn("🌍 App: Consider adding alias mapping for:", country);
                   }
-
-                  // Set highlighted country for visual effect
-                  setVoiceHighlightedCountry(point.country);
-
-                  // Focus globe instantly (no animation)
-                  globeRef.current.pointOfView(
-                    {
-                      lat: point.lat,
-                      lng: point.lng,
-                      altitude: 1.2,
-                    },
-                    cameraTransitionMs,
-                  );
-                } else {
-                  setShowDetail(false);
-                  setSelected(null);
-                  console.warn("🌍 App: Could not find point for country:", country);
-                  console.warn("🌍 App: Available countries:", points.map((p) => p.country).sort());
-                  console.warn("🌍 App: Consider adding alias mapping for:", country);
-                }
-              }}
-              onVoiceSessionEnd={() => {
-                setVoiceHighlightedCountry(null);
-                if (globeRef.current) {
-                  const controls = globeRef.current.controls();
-                  if (controls) {
-                    controls.autoRotate = true;
+                }}
+                onVoiceSessionEnd={() => {
+                  setVoiceHighlightedCountry(null);
+                  if (globeRef.current) {
+                    const controls = globeRef.current.controls();
+                    if (controls) {
+                      controls.autoRotate = true;
+                    }
                   }
-                }
-                // Prefer the last voice-detected country, fallback to currently selected country on the map
-                const fallbackCountry = lastVapiCountry || selected?.country || null;
-                if (fallbackCountry && isAuthenticated) {
-                  setLastVapiCountry(fallbackCountry);
-                  setShowEmailOffer(true);
-                }
-              }}
-              onSessionActiveChange={(active) => setIsVoiceActive(active)}
+                  // Prefer the last voice-detected country, fallback to currently selected country on the map
+                  const fallbackCountry = lastVapiCountry || selected?.country || null;
+                  if (fallbackCountry && isAuthenticated) {
+                    setLastVapiCountry(fallbackCountry);
+                    setShowEmailOffer(true);
+                  }
+                }}
+                onSessionActiveChange={(active) => setIsVoiceActive(active)}
               />
             )}
 
@@ -1539,7 +1577,15 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">Total Scams</p>
                   <p className="mt-1 text-xl font-extralight text-white/90">
-                    {isAuthLoading || totalScamCount === undefined ? "..." : totalScamCount}
+                    {isAuthLoading || totalScamCount === undefined ? (
+                      <span className="loading-dots" style={{ color: "#60a5fa" }}>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </span>
+                    ) : (
+                      totalScamCount
+                    )}
                   </p>
                   <div className="absolute top-3 right-3">
                     <svg className="h-3 w-3 text-blue-400/30" fill="currentColor" viewBox="0 0 20 20">
@@ -1559,7 +1605,15 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">High Risk</p>
                   <p className="mt-1 text-xl font-extralight text-red-400">
-                    {isAuthLoading || !scamStories ? "..." : highRiskCount}
+                    {isAuthLoading || !scamStories ? (
+                      <span className="loading-dots" style={{ color: "#f87171" }}>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </span>
+                    ) : (
+                      highRiskCount
+                    )}
                   </p>
                   <div className="absolute top-3 right-3">
                     <svg className="h-3 w-3 text-red-400/30" fill="currentColor" viewBox="0 0 20 20">
@@ -1578,9 +1632,15 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">Reports</p>
                   <p className="mt-1 text-xl font-extralight text-green-400">
-                    {isAuthLoading || !scamStories || !locationStats
-                      ? "..."
-                      : totalReportsFromVisualization || points.reduce((sum, p) => sum + p.reports, 0)}
+                    {isAuthLoading || !scamStories || !locationStats ? (
+                      <span className="loading-dots" style={{ color: "#4ade80" }}>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </span>
+                    ) : (
+                      totalReportsFromVisualization || points.reduce((sum, p) => sum + p.reports, 0)
+                    )}
                   </p>
                   <div className="absolute top-3 right-3">
                     <svg className="h-3 w-3 text-green-400/30" fill="currentColor" viewBox="0 0 20 20">
