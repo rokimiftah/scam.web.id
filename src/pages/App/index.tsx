@@ -302,20 +302,33 @@ export default function App() {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const countryColorMapRef = useRef<Record<string, string>>({});
 
-  // Fetch real scam data from Convex - ONLY if authenticated
-  const scamStories = useQuery(api.scams.getScamStoriesForGlobe, isAuthenticated ? {} : "skip");
-  const locationStats = useQuery(api.scams.getAllLocationStats, isAuthenticated ? {} : "skip");
-  const totalScamCount = useQuery(api.scams.getTotalScamCount, isAuthenticated ? {} : "skip");
+  // Fetch real scam data from Convex - ALWAYS load (let backend handle auth)
+  // This ensures queries start immediately instead of waiting for user auth
+  const scamStories = useQuery(api.scams.getScamStoriesForGlobe);
+  const locationStats = useQuery(api.scams.getAllLocationStats);
+  const totalScamCount = useQuery(api.scams.getTotalScamCount);
   const selectedStoryDetails = useQuery(api.scams.getScamStory, selectedStoryId ? { storyId: selectedStoryId } : "skip");
 
-  // Debug queries
+  // Track if data has loaded at least once
+  const [dataLoaded, setDataLoaded] = useState(false);
+
+  // Debug queries and track loading
   useEffect(() => {
+    const storiesLoaded = scamStories !== undefined && scamStories !== null;
+    const statsLoaded = locationStats !== undefined && locationStats !== null;
+    const countLoaded = totalScamCount !== undefined && totalScamCount !== null;
+
     console.log("📡 Query Status:", {
       isAuthenticated,
-      scamStories: scamStories === undefined ? "loading" : scamStories === null ? "null" : `${scamStories?.length} items`,
-      locationStats: locationStats === undefined ? "loading" : locationStats === null ? "null" : `${locationStats?.length} items`,
-      totalCount: totalScamCount,
+      scamStories: scamStories === undefined ? "⏳ loading" : scamStories === null ? "❌ null" : `✅ ${scamStories?.length} items`,
+      locationStats: locationStats === undefined ? "⏳ loading" : locationStats === null ? "❌ null" : `✅ ${locationStats?.length} items`,
+      totalCount: totalScamCount === undefined ? "⏳ loading" : totalScamCount === null ? "❌ null" : `✅ ${totalScamCount}`,
     });
+
+    if (storiesLoaded && statsLoaded && countLoaded && !dataLoaded) {
+      console.log("✅ All data loaded successfully!");
+      setDataLoaded(true);
+    }
 
     if (scamStories === null) {
       console.error("❌ scamStories query returned null - possible permission error");
@@ -323,7 +336,7 @@ export default function App() {
     if (locationStats === null) {
       console.error("❌ locationStats query returned null - possible permission error");
     }
-  }, [isAuthenticated, scamStories, locationStats, totalScamCount]);
+  }, [isAuthenticated, scamStories, locationStats, totalScamCount, dataLoaded]);
 
   // Action to send prevention tips email
   const sendPreventionTips = useAction(api.aiAnalyzer.sendPreventionTips);
@@ -392,23 +405,23 @@ export default function App() {
 
   // Convert scam stories to map points - GROUP BY COUNTRY
   const { points, highRiskCount, totalReportsFromVisualization } = useMemo(() => {
-    // Return empty if not authenticated OR data still loading
-    if (!isAuthenticated) {
-      console.log("⚠️ Not authenticated, skipping points");
-      return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
-    }
-
+    // Return empty if data still loading OR not authenticated
     if (scamStories === undefined || locationStats === undefined) {
-      console.log("⚠️ Data still loading:", {
+      console.log("⏳ Data still loading:", {
         scamStories: scamStories === undefined ? "loading..." : `${scamStories?.length} items`,
         locationStats: locationStats === undefined ? "loading..." : `${locationStats?.length} items`,
       });
       return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
     }
 
+    // If user not authenticated, return empty (backend will return empty arrays)
+    if (!isAuthenticated) {
+      console.log("⚠️ Not authenticated, using empty data");
+      return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
+    }
+
     if (!scamStories || !locationStats) {
-      console.log("⚠️ Points empty because:", {
-        isAuthenticated,
+      console.log("⚠️ Points empty because data is null:", {
         hasScamStories: !!scamStories,
         scamStoriesCount: scamStories?.length,
         hasLocationStats: !!locationStats,
@@ -1816,6 +1829,13 @@ export default function App() {
         {/* Right Column - Globe */}
         <div className="relative flex h-full w-2/3 flex-col" style={{ backgroundColor: "#15151a" }}>
           <section ref={heroRef} className="relative flex-1 overflow-hidden" style={{ backgroundColor: "#15151a" }}>
+            {/* Data Loading Overlay - Show when queries are loading */}
+            {(scamStories === undefined || locationStats === undefined || totalScamCount === undefined) && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md">
+                <p className="animate-pulse text-lg font-light tracking-widest text-white/90 uppercase">Loading Data</p>
+              </div>
+            )}
+            
             {/* Globe Container - Adjusted to not overlap status bar */}
             <div className="absolute inset-0" style={{ backgroundColor: "#15151a" }}>
               <div ref={globeContainerRef} className="h-full w-full" style={{ backgroundColor: "#15151a" }}>

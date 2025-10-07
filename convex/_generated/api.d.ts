@@ -24,6 +24,7 @@ import type * as scrape_firecrawl from "../scrape/firecrawl.js";
 import type * as scrape_index from "../scrape/index.js";
 import type * as scrape_singleUrl from "../scrape/singleUrl.js";
 import type * as users from "../users.js";
+import type * as vapiTools from "../vapiTools.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   "scrape/index": typeof scrape_index;
   "scrape/singleUrl": typeof scrape_singleUrl;
   users: typeof users;
+  vapiTools: typeof vapiTools;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,

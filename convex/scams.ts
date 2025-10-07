@@ -8,7 +8,13 @@ import { internalQuery, mutation, query } from "./_generated/server";
 export const getTotalScamCount = query({
   args: {},
   handler: async (ctx) => {
-    // Use collect() which handles pagination internally with single paginated query
+    // Check authentication first
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return 0; // Return 0 for unauthenticated users
+    }
+
+    // Optimized: Use collect() which handles pagination internally
     const stories = await ctx.db
       .query("scamStories")
       .withIndex("by_processed", (q) => q.eq("isProcessed", true))
@@ -22,31 +28,39 @@ export const getTotalScamCount = query({
 export const getScamStoriesForGlobe = query({
   args: {},
   handler: async (ctx) => {
-    // Use collect() to get all stories with single paginated query
+    // Check authentication first
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return []; // Return empty array for unauthenticated users
+    }
+
+    // Optimized: Use collect() to get all stories with single paginated query
     const allStories = await ctx.db
       .query("scamStories")
       .withIndex("by_processed", (q) => q.eq("isProcessed", true))
       .collect();
 
-    // Only extract essential fields for visualization
-    return allStories.map((story) => ({
-      _id: story._id,
-      country: story.country,
-      city: story.city,
-      coordinates: story.coordinates,
-      scamType: story.scamType,
-      scamMethods: story.scamMethods,
-      title: story.title,
-      summary: story.summary,
-      postDate: story.postDate,
-      upvotes: story.upvotes,
-      moneyLost: story.moneyLost,
-      currency: story.currency,
-      redditUrl: story.redditUrl,
-      warningSignals: story.warningSignals,
-      preventionTips: story.preventionTips,
-      authorUsername: story.authorUsername,
-    }));
+    // Only extract essential fields for visualization (reduce payload size)
+    return allStories
+      .filter((story) => story.coordinates?.lat && story.coordinates?.lng) // Only stories with coordinates
+      .map((story) => ({
+        _id: story._id,
+        country: story.country,
+        city: story.city,
+        coordinates: story.coordinates,
+        scamType: story.scamType,
+        scamMethods: story.scamMethods,
+        title: story.title,
+        summary: story.summary,
+        postDate: story.postDate,
+        upvotes: story.upvotes,
+        moneyLost: story.moneyLost,
+        currency: story.currency,
+        redditUrl: story.redditUrl,
+        warningSignals: story.warningSignals,
+        preventionTips: story.preventionTips,
+        authorUsername: story.authorUsername,
+      }));
   },
 });
 
@@ -188,13 +202,22 @@ export const searchScamStories = query({
 export const getAllLocationStats = query({
   args: {},
   handler: async (ctx) => {
-    // Use collect() for single paginated query
+    // Check authentication first
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return []; // Return empty array for unauthenticated users
+    }
+
+    // Optimized: Use collect() for single paginated query
     const allStats = await ctx.db.query("locationStats").collect();
 
-    // Sort by total scams
-    allStats.sort((a, b) => b.totalScams - a.totalScams);
+    // Filter only stats with coordinates (for globe visualization)
+    const statsWithCoords = allStats.filter((stat) => stat.coordinates?.lat && stat.coordinates?.lng);
 
-    return allStats;
+    // Sort by total scams (descending)
+    statsWithCoords.sort((a, b) => b.totalScams - a.totalScams);
+
+    return statsWithCoords;
   },
 });
 
