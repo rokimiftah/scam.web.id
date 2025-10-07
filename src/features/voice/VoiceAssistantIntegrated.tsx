@@ -588,6 +588,14 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
             console.warn("🚨 UNEXPECTED CALL END DETECTED:", message);
           }
 
+          // Handle "hang" event - indicates assistant is waiting/processing
+          if (message.type === "hang") {
+            console.log("⏳ VAPI Hang Event - Assistant is processing...");
+            // Show thinking indicator while tool is executing on server
+            setIsThinking(true);
+            return;
+          }
+
           if (message.type === "transcript") {
             const rawTranscript = message.transcript || "";
             // Clean consecutive duplicate words/phrases
@@ -694,6 +702,14 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
             // Parse tool call to trigger globe highlighting
             const toolCalls = message.toolCalls || message.toolCallList || [];
             for (const toolCall of toolCalls) {
+              const toolCallId = toolCall.id;
+              
+              // Deduplicate: skip if already processed
+              if (toolCallId && processedToolCallsRef.current.has(toolCallId)) {
+                console.log("⏭️ Skipping duplicate tool-calls event:", toolCallId);
+                continue;
+              }
+              
               const functionName = toolCall.function?.name || toolCall.name;
               const rawArgs = toolCall.function?.arguments || toolCall.arguments;
 
@@ -701,9 +717,14 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
                 const args = parseFunctionArgs(rawArgs);
                 const country = args.country;
 
-                if (country) {
+                if (country && onLocationQuery) {
                   console.log("🌍 Triggering globe highlight for:", country);
                   onLocationQuery(country);
+                  
+                  // Mark as processed after successful highlighting
+                  if (toolCallId) {
+                    processedToolCallsRef.current.add(toolCallId);
+                  }
                 }
               }
             }
@@ -974,6 +995,13 @@ DO NOT say "I don't have data" if the tool gave you risk level and scam types - 
                       url: "https://api.dev.rokimiftah.id/vapi/tool-call",
                       timeoutSeconds: 20,
                     },
+                    messages: [
+                      {
+                        type: "request-start",
+                        content: "Let me check the scam data for that location...",
+                        conditions: [],
+                      },
+                    ],
                   },
                   {
                     type: "function",
