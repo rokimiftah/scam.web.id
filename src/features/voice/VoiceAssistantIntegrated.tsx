@@ -703,13 +703,13 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
             const toolCalls = message.toolCalls || message.toolCallList || [];
             for (const toolCall of toolCalls) {
               const toolCallId = toolCall.id;
-              
+
               // Deduplicate: skip if already processed
               if (toolCallId && processedToolCallsRef.current.has(toolCallId)) {
                 console.log("⏭️ Skipping duplicate tool-calls event:", toolCallId);
                 continue;
               }
-              
+
               const functionName = toolCall.function?.name || toolCall.name;
               const rawArgs = toolCall.function?.arguments || toolCall.arguments;
 
@@ -720,7 +720,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
                 if (country && onLocationQuery) {
                   console.log("🌍 Triggering globe highlight for:", country);
                   onLocationQuery(country);
-                  
+
                   // Mark as processed after successful highlighting
                   if (toolCallId) {
                     processedToolCallsRef.current.add(toolCallId);
@@ -1182,7 +1182,7 @@ DO NOT say "I don't have data" if the tool gave you risk level and scam types - 
         {/* Footer */}
         <div className="border-t border-white/10 bg-black/20 px-6 py-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-white/40">{conversationHistory.length} messages</span>
+            <span></span>
             <button
               onClick={() => vapiRef.current?.stop()}
               className="cursor-pointer bg-red-500/20 px-4 py-2 text-xs font-medium text-red-400 transition-all hover:bg-red-500/30"
