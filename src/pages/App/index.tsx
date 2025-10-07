@@ -1,5 +1,7 @@
 // src/pages/App/index.tsx
 
+/** biome-ignore-all lint/correctness/useExhaustiveDependencies: <> */
+
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { VoiceAssistantHandle } from "@features/voice/VoiceAssistantIntegrated";
 import type { GlobeMethods } from "react-globe.gl";
@@ -73,6 +75,7 @@ const geoJsonToDbCountryMap: Record<string, string> = {
   "Côte d'Ivoire": "Ivory Coast",
   "Congo (Democratic Republic of the)": "Democratic Republic of the Congo",
   Congo: "Republic of the Congo",
+  Turkey: "Türkiye", // GeoJSON has "Turkey", DB has "Türkiye"
   // Most other countries use the same name
 };
 
@@ -305,6 +308,23 @@ export default function App() {
   const totalScamCount = useQuery(api.scams.getTotalScamCount, isAuthenticated ? {} : "skip");
   const selectedStoryDetails = useQuery(api.scams.getScamStory, selectedStoryId ? { storyId: selectedStoryId } : "skip");
 
+  // Debug queries
+  useEffect(() => {
+    console.log("📡 Query Status:", {
+      isAuthenticated,
+      scamStories: scamStories === undefined ? "loading" : scamStories === null ? "null" : `${scamStories?.length} items`,
+      locationStats: locationStats === undefined ? "loading" : locationStats === null ? "null" : `${locationStats?.length} items`,
+      totalCount: totalScamCount,
+    });
+
+    if (scamStories === null) {
+      console.error("❌ scamStories query returned null - possible permission error");
+    }
+    if (locationStats === null) {
+      console.error("❌ locationStats query returned null - possible permission error");
+    }
+  }, [isAuthenticated, scamStories, locationStats, totalScamCount]);
+
   // Action to send prevention tips email
   const sendPreventionTips = useAction(api.aiAnalyzer.sendPreventionTips);
 
@@ -373,9 +393,34 @@ export default function App() {
   // Convert scam stories to map points - GROUP BY COUNTRY
   const { points, highRiskCount, totalReportsFromVisualization } = useMemo(() => {
     // Return empty if not authenticated OR data still loading
-    if (!isAuthenticated || !scamStories || !locationStats) {
+    if (!isAuthenticated) {
+      console.log("⚠️ Not authenticated, skipping points");
       return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
     }
+
+    if (scamStories === undefined || locationStats === undefined) {
+      console.log("⚠️ Data still loading:", {
+        scamStories: scamStories === undefined ? "loading..." : `${scamStories?.length} items`,
+        locationStats: locationStats === undefined ? "loading..." : `${locationStats?.length} items`,
+      });
+      return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
+    }
+
+    if (!scamStories || !locationStats) {
+      console.log("⚠️ Points empty because:", {
+        isAuthenticated,
+        hasScamStories: !!scamStories,
+        scamStoriesCount: scamStories?.length,
+        hasLocationStats: !!locationStats,
+        locationStatsCount: locationStats?.length,
+      });
+      return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
+    }
+
+    console.log("✅ Processing points with data:", {
+      storiesCount: scamStories.length,
+      statsCount: locationStats.length,
+    });
 
     // Create points for visualization (only for stories with coordinates)
     // Group stories by COUNTRY, not exact coordinates
@@ -580,6 +625,188 @@ export default function App() {
     if (!isAuthenticated) return [];
     return points.filter((p) => p.risk >= riskFilter);
   }, [points, riskFilter, isAuthenticated]);
+
+  // Use ref to always get latest points (avoid stale closure)
+  const pointsRef = useRef(points);
+  useEffect(() => {
+    pointsRef.current = points;
+    console.log("📍 Points updated in ref:", points.length);
+  }, [points]);
+
+  // Memoized callback for location query to avoid stale closure
+  const handleLocationQuery = useCallback(
+    (country: string) => {
+      const currentPoints = pointsRef.current;
+      console.log("🔍 handleLocationQuery called with:", country, "Points count:", currentPoints.length);
+
+      // KEY = what database has, VALUES = what user might say
+      const countryAliases: Record<string, string[]> = {
+        // Database has "Türkiye", user says "Turkey"
+        Türkiye: ["Turkey", "Turkiye"],
+        "People's Republic of China": ["China", "PRC"],
+        "Czech Republic": ["Czechia"],
+        "North Macedonia": ["Macedonia", "FYROM"],
+        "United States": ["USA", "US", "America"],
+        "United Kingdom": ["UK", "Britain", "England"],
+        "United Arab Emirates": ["UAE", "Emirates"],
+        "South Korea": ["Korea", "ROK"],
+        "Dominican Republic": ["DR", "Dominican Rep"],
+        "New Zealand": ["NZ"],
+        "South Africa": ["RSA"],
+        "Saudi Arabia": ["KSA"],
+        "Papua New Guinea": ["PNG"],
+        "Solomon Islands": ["Solomons"],
+        "The Gambia": ["Gambia"],
+        "Sri Lanka": ["Ceylon"],
+        Myanmar: ["Burma"],
+        Vietnam: ["Viet Nam"],
+        "Hong Kong": ["HK"],
+        Netherlands: ["Holland"],
+        Switzerland: ["Swiss"],
+        Germany: ["Deutschland"],
+        Greece: ["Hellas"],
+        Russia: ["Russian Federation"],
+        Egypt: ["Misr"],
+        Japan: ["Nippon"],
+        India: ["Bharat"],
+        Thailand: ["Siam"],
+        Cambodia: ["Kampuchea"],
+        Laos: ["Lao"],
+        Philippines: ["Pilipinas"],
+        Indonesia: ["ID"],
+        Malaysia: ["MY"],
+        Singapore: ["SG"],
+        Australia: ["Oz"],
+        Brazil: ["Brasil"],
+        Mexico: ["MX"],
+        Spain: ["ES"],
+        France: ["FR"],
+        Italy: ["IT"],
+        Portugal: ["PT"],
+        Austria: ["AT"],
+        Belgium: ["BE"],
+        Poland: ["PL"],
+        Ukraine: ["UA"],
+        Romania: ["RO"],
+        Hungary: ["HU"],
+        Sweden: ["SE"],
+        Norway: ["NO"],
+        Ireland: ["IE"],
+        Croatia: ["HR"],
+        Serbia: ["RS"],
+        Montenegro: ["ME"],
+        Albania: ["AL"],
+        Lithuania: ["LT"],
+        Slovakia: ["SK"],
+        Morocco: ["MA"],
+        Tunisia: ["TN"],
+        Ghana: ["GH"],
+        Nigeria: ["NG"],
+        Ethiopia: ["ET"],
+        Uganda: ["UG"],
+        Rwanda: ["RW"],
+        Zimbabwe: ["ZW"],
+        Pakistan: ["PK"],
+        Jordan: ["JO"],
+        Oman: ["OM"],
+        Qatar: ["QA"],
+        Syria: ["SY"],
+        Georgia: ["GE"],
+        Azerbaijan: ["AZ"],
+        Kazakhstan: ["KZ"],
+        Peru: ["PE"],
+        Chile: ["CL"],
+        Colombia: ["CO"],
+        Ecuador: ["EC"],
+        Paraguay: ["PY"],
+        Panama: ["PA"],
+        Guatemala: ["GT"],
+        Nicaragua: ["NI"],
+        "El Salvador": ["SV"],
+        Haiti: ["HT"],
+        Cuba: ["CU"],
+        Jamaica: ["JM"],
+        Iceland: ["IS"],
+        Malta: ["MT"],
+        Cyprus: ["CY"],
+      };
+
+      // Function to find country by aliases
+      const findCountryWithAliases = (searchCountry: string) => {
+        // Try direct matches first
+        let point = currentPoints.find((p) => p.country === searchCountry);
+        if (point) return point;
+
+        // Try case-insensitive
+        point = currentPoints.find((p) => p.country.toLowerCase() === searchCountry.toLowerCase());
+        if (point) return point;
+
+        // Try aliases
+        for (const [realCountry, aliases] of Object.entries(countryAliases)) {
+          if (aliases.some((alias) => alias.toLowerCase() === searchCountry.toLowerCase())) {
+            point = currentPoints.find((p) => p.country === realCountry);
+            if (point) return point;
+          }
+        }
+
+        // Try partial match
+        point = currentPoints.find(
+          (p) =>
+            p.country.toLowerCase().includes(searchCountry.toLowerCase()) ||
+            searchCountry.toLowerCase().includes(p.country.toLowerCase()),
+        );
+
+        return point;
+      };
+
+      const point = findCountryWithAliases(country);
+
+      console.log("🎯 VAPI Location Query:", {
+        requestedCountry: country,
+        foundPoint: point ? point.country : "NOT FOUND",
+        hasData: !!point,
+        reports: point?.reports,
+      });
+
+      if (point && globeRef.current) {
+        setSelected(point);
+        setShowDetail(true);
+        setSelectedStoryId(null);
+        setLastVapiCountry(point.country);
+
+        // Stop rotation and highlight
+        const controls = globeRef.current.controls();
+        if (controls) {
+          controls.autoRotate = false;
+        }
+
+        setVoiceHighlightedCountry(point.country);
+        console.log("🔵 Highlighting country:", point.country);
+        console.log("🗺️ GeoJSON mapping check:", {
+          dbCountry: point.country,
+          geoJsonEquivalent:
+            Object.entries(geoJsonToDbCountryMap).find(([_geo, db]) => db === point.country)?.[0] || point.country,
+        });
+
+        // Focus globe
+        globeRef.current.pointOfView(
+          {
+            lat: point.lat,
+            lng: point.lng,
+            altitude: 1.2,
+          },
+          1200,
+        );
+      } else {
+        setShowDetail(false);
+        setSelected(null);
+        setVoiceHighlightedCountry(null);
+        console.warn("❌ App: Could not find point for country:", country);
+        console.warn("📊 App: Available countries:", currentPoints.map((p) => p.country).sort());
+      }
+    },
+    [globeRef, setSelected, setShowDetail, setSelectedStoryId, setLastVapiCountry, setVoiceHighlightedCountry],
+  );
 
   // Authentication handlers
   const handleSendMagicLink = useCallback(
@@ -812,108 +1039,8 @@ export default function App() {
               <VoiceAssistantIntegrated
                 ref={voiceAssistantRef}
                 isAuthenticated={isAuthenticated}
-                onLocationQuery={(country) => {
-                  // Country name aliases mapping
-                  const countryAliases: Record<string, string[]> = {
-                    "United States": ["America", "USA", "US", "United States of America"],
-                    "United Kingdom": ["UK", "Britain", "England", "Great Britain"],
-                    "South Korea": ["Korea", "Republic of Korea"],
-                    "North Korea": ["DPRK", "Democratic People's Republic of Korea"],
-                    Russia: ["Russian Federation"],
-                    China: ["People's Republic of China", "PRC"],
-                    Taiwan: ["Republic of China", "Chinese Taipei"],
-                    Vietnam: ["Viet Nam"],
-                    Myanmar: ["Burma"],
-                    "Czech Republic": ["Czechia"],
-                    Netherlands: ["Holland"],
-                    Switzerland: ["Swiss"],
-                    UAE: ["United Arab Emirates"],
-                    "Saudi Arabia": ["KSA", "Kingdom of Saudi Arabia"],
-                  };
-
-                  // Function to find country by aliases
-                  const findCountryWithAliases = (searchCountry: string) => {
-                    // Try direct matches first
-                    let point = points.find((p) => p.country === searchCountry);
-                    if (point) return point;
-
-                    // Try case-insensitive
-                    point = points.find((p) => p.country.toLowerCase() === searchCountry.toLowerCase());
-                    if (point) return point;
-
-                    // Try aliases
-                    for (const [realCountry, aliases] of Object.entries(countryAliases)) {
-                      if (aliases.some((alias) => alias.toLowerCase() === searchCountry.toLowerCase())) {
-                        point = points.find((p) => p.country === realCountry);
-                        if (point) {
-                          return point;
-                        }
-                      }
-                    }
-
-                    // Try partial match
-                    point = points.find(
-                      (p) =>
-                        p.country.toLowerCase().includes(searchCountry.toLowerCase()) ||
-                        searchCountry.toLowerCase().includes(p.country.toLowerCase()),
-                    );
-                    if (point) return point;
-
-                    // Try reverse alias lookup (if database has alias but search is real name)
-                    point = points.find((p) => {
-                      for (const [realCountry, aliases] of Object.entries(countryAliases)) {
-                        if (
-                          realCountry.toLowerCase() === searchCountry.toLowerCase() &&
-                          aliases.some((alias) => alias.toLowerCase() === p.country.toLowerCase())
-                        ) {
-                          return true;
-                        }
-                      }
-                      return false;
-                    });
-
-                    return point;
-                  };
-
-                  // Keep globe auto-rotation running even when focusing on location
-
-                  // Find the country point using improved matching
-                  const point = findCountryWithAliases(country);
-
-                  if (point && globeRef.current) {
-                    setSelected(point);
-                    setShowDetail(true);
-                    setSelectedStoryId(null);
-                    setLastVapiCountry(point.country);
-
-                    const cameraTransitionMs = 1200;
-
-                    // 🎯 VOICE-TRIGGERED: Stop rotation and highlight country immediately
-                    const controls = globeRef.current.controls();
-                    if (controls) {
-                      controls.autoRotate = false; // Stop rotation immediately
-                    }
-
-                    // Set highlighted country for visual effect
-                    setVoiceHighlightedCountry(point.country);
-
-                    // Focus globe instantly (no animation)
-                    globeRef.current.pointOfView(
-                      {
-                        lat: point.lat,
-                        lng: point.lng,
-                        altitude: 1.2,
-                      },
-                      cameraTransitionMs,
-                    );
-                  } else {
-                    setShowDetail(false);
-                    setSelected(null);
-                    console.warn("🌍 App: Could not find point for country:", country);
-                    console.warn("🌍 App: Available countries:", points.map((p) => p.country).sort());
-                    console.warn("🌍 App: Consider adding alias mapping for:", country);
-                  }
-                }}
+                pointsData={points}
+                onLocationQuery={handleLocationQuery}
                 onVoiceSessionEnd={() => {
                   setVoiceHighlightedCountry(null);
                   if (globeRef.current) {
@@ -1733,8 +1860,22 @@ export default function App() {
                         const geoJsonName = d.properties?.NAME;
                         const dbCountryName = geoJsonToDbCountryMap[geoJsonName] || geoJsonName;
 
+                        // Debug logging for Türkiye specifically
+                        if (
+                          voiceHighlightedCountry === "Türkiye" &&
+                          (geoJsonName.includes("Turkey") || dbCountryName.includes("Türkiye"))
+                        ) {
+                          console.log("🔍 Turkey polygon check:", {
+                            geoJsonName,
+                            dbCountryName,
+                            voiceHighlightedCountry,
+                            match: dbCountryName === voiceHighlightedCountry,
+                          });
+                        }
+
                         // Highlight the voice-selected country
                         if (voiceHighlightedCountry && dbCountryName === voiceHighlightedCountry) {
+                          console.log("✅ HIGHLIGHTING polygon:", dbCountryName);
                           return "#3b82f6"; // Bright blue for highlighted country
                         }
 

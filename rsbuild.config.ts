@@ -121,6 +121,10 @@ export default defineConfig({
     ],
   },
 
+  performance: {
+    removeConsole: true,
+  },
+
   plugins: [pluginReact()],
 
   server: {

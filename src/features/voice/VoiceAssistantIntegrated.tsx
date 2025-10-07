@@ -1,5 +1,8 @@
 // src/features/voice/VoiceAssistantIntegrated.tsx
 
+/** biome-ignore-all lint/style/useTemplate: <> */
+/** biome-ignore-all lint/correctness/useExhaustiveDependencies: <> */
+
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import Vapi from "@vapi-ai/web";
@@ -12,6 +15,7 @@ interface VoiceAssistantProps {
   onLocationQuery?: (country: string) => void;
   onVoiceSessionEnd?: () => void;
   onSessionActiveChange?: (active: boolean) => void;
+  pointsData?: any[]; // Points data from App component for accurate country data
 }
 
 export interface VoiceAssistantHandle {
@@ -105,7 +109,7 @@ const mergeTexts = (text1: string, text2: string): string => {
 };
 
 const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistantProps>(
-  ({ isAuthenticated, onLocationQuery, onVoiceSessionEnd, onSessionActiveChange }, ref) => {
+  ({ isAuthenticated, onLocationQuery, onVoiceSessionEnd, onSessionActiveChange, pointsData }, ref) => {
     const [isListening, setIsListening] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const [conversationHistory, setConversationHistory] = useState<
@@ -129,9 +133,15 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
     const onLocationQueryRef = useRef(onLocationQuery);
     const trendingScamsRef = useRef(trendingScams);
     const getHighRiskLocationsRef = useRef<() => string[]>(() => []);
+    const getLocationScamDataRef = useRef<() => Record<string, any>>(() => ({}));
+    const pointsDataRef = useRef(pointsData);
     const onVoiceSessionEndRef = useRef(onVoiceSessionEnd);
     const onSessionActiveChangeRef = useRef(onSessionActiveChange);
     const sendPreventionTipsEmailActionRef = useRef(sendPreventionTipsEmailAction);
+
+    useEffect(() => {
+      pointsDataRef.current = pointsData;
+    }, [pointsData]);
 
     useEffect(() => {
       onLocationQueryRef.current = onLocationQuery;
@@ -171,7 +181,6 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
     const travelerGreetingName = travelerName ?? "there";
 
     // Auto-scroll to latest message
-    // biome-ignore lint/correctness/useExhaustiveDependencies: Dependencies are intentional triggers for scroll behavior
     useEffect(() => {
       if (messagesEndRef.current) {
         messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -264,6 +273,10 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
       getHighRiskLocationsRef.current = getHighRiskLocations;
     }, [getHighRiskLocations]);
 
+    useEffect(() => {
+      getLocationScamDataRef.current = getLocationScamData;
+    }, [getLocationScamData]);
+
     // Handle custom function calls from the assistant
     const sendToolResultToVapi = useCallback(
       (
@@ -278,9 +291,19 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
         },
       ) => {
         if (!vapiRef.current || !toolCallId) {
-          console.warn("🚨 Cannot send tool result: missing vapi instance or toolCallId");
+          console.warn("🚨 Cannot send tool result: missing vapi instance or toolCallId", {
+            hasVapi: !!vapiRef.current,
+            toolCallId,
+          });
           return;
         }
+
+        const content = payload.result || payload.error || "Tool execution completed";
+        console.log("✉️ Sending to VAPI:", {
+          toolCallId,
+          functionName,
+          content: content.substring(0, 100) + "...",
+        });
 
         try {
           vapiRef.current.send({
@@ -289,10 +312,11 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
               role: "tool",
               name: functionName,
               tool_call_id: toolCallId,
-              content: payload.result || payload.error || "Tool execution completed",
+              content: content,
             },
             triggerResponseEnabled: true,
           } as any);
+          console.log("✅ Tool result sent successfully to VAPI");
         } catch (error) {
           console.error("❌ Failed to send tool result to Vapi:", error);
         }
@@ -305,6 +329,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
       const countryArg = typeof args.country === "string" ? args.country.trim() : "";
       const latestOnLocationQuery = onLocationQueryRef.current;
       const latestHighRiskFn = getHighRiskLocationsRef.current;
+      const latestPointsData = pointsDataRef.current;
       const latestTrendingScams = trendingScamsRef.current;
       const latestSendTipsAction = sendPreventionTipsEmailActionRef.current;
 
@@ -313,13 +338,97 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
         case "travel-scam-location-query": // Dashboard tool name
           if (countryArg && latestOnLocationQuery) {
             try {
+              console.log("🎯 VAPI Tool Call: queryScamsByLocation", { country: countryArg });
+
+              // Focus the globe on the country
               latestOnLocationQuery(countryArg);
-              return {
-                success: true,
-                result: `Successfully focused on ${countryArg}`,
-                country: countryArg,
-                action: "map_focused",
-              };
+
+              // Use points data instead of locationData for accurate country info
+              const points = latestPointsData || [];
+              console.log(
+                "📊 Available countries in points:",
+                points.map((p) => p.country),
+              );
+
+              // Find matching country in points (handle aliases and case-insensitive)
+              let countryPoint = points.find((p) => p.country === countryArg);
+              let matchedCountryName = countryArg;
+
+              if (!countryPoint) {
+                // Try case-insensitive exact match
+                const lowerCountryArg = countryArg.toLowerCase();
+                countryPoint = points.find((p) => p.country.toLowerCase() === lowerCountryArg);
+                if (countryPoint) {
+                  matchedCountryName = countryPoint.country;
+                  console.log("✓ Found via case-insensitive match:", matchedCountryName);
+                } else {
+                  // Try partial match (e.g., "America" matches "United States")
+                  countryPoint = points.find(
+                    (p) => p.country.toLowerCase().includes(lowerCountryArg) || lowerCountryArg.includes(p.country.toLowerCase()),
+                  );
+                  if (countryPoint) {
+                    matchedCountryName = countryPoint.country;
+                    console.log("✓ Found via partial match:", matchedCountryName);
+                  }
+                }
+              }
+
+              if (countryPoint && countryPoint.reports > 0) {
+                // Country has scam data - send detailed information
+                console.log("🔍 FOUND COUNTRY POINT:", {
+                  country: matchedCountryName,
+                  reports: countryPoint.reports,
+                  risk: countryPoint.risk,
+                  types: countryPoint.types,
+                  warnings: countryPoint.warningSignals,
+                  tips: countryPoint.preventionTips,
+                });
+
+                const scamTypesText =
+                  countryPoint.types && countryPoint.types.length > 0
+                    ? countryPoint.types.slice(0, 3).join(", ")
+                    : "various types";
+
+                const warningSignalsText =
+                  countryPoint.warningSignals && countryPoint.warningSignals.length > 0
+                    ? countryPoint.warningSignals.slice(0, 2).join(". ")
+                    : "";
+
+                const preventionTipsText =
+                  countryPoint.preventionTips && countryPoint.preventionTips.length > 0
+                    ? countryPoint.preventionTips.slice(0, 2).join(". ")
+                    : "";
+
+                const riskLevelText =
+                  countryPoint.risk >= 0.6 ? "HIGH RISK" : countryPoint.risk >= 0.4 ? "MEDIUM RISK" : "LOW RISK";
+
+                // Simple, direct format that AI can easily parse
+                const resultText = `${matchedCountryName}: ${riskLevelText}, ${countryPoint.reports} scam reports. Types: ${scamTypesText}. ${warningSignalsText ? `Warnings: ${warningSignalsText}. ` : ""}${preventionTipsText ? `Tips: ${preventionTipsText}` : ""}`;
+
+                console.log("✅ Sending scam data to VAPI:", resultText);
+                console.log("✅ Result length:", resultText.length, "characters");
+
+                return {
+                  success: true,
+                  result: resultText,
+                  country: matchedCountryName,
+                  action: "map_focused",
+                  data: countryPoint,
+                };
+              } else {
+                // No scam data for this country
+                const resultText = `${countryArg}: No specific scam data available. Stay vigilant - common scams include fake tickets, bogus accommodations, overpriced taxis, and tourist traps. Use official platforms and payment protection.`;
+
+                console.log("⚠️ No data found for country, sending generic advice:", resultText);
+
+                return {
+                  success: true,
+                  result: resultText,
+                  country: countryArg,
+                  action: "map_focused",
+                  data: null,
+                };
+              }
             } catch (error) {
               console.error("Error focusing globe on location:", error);
               return {
@@ -409,6 +518,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
     const attachVapiEventHandlers = useCallback(
       (vapiInstance: Vapi) => {
         vapiInstance.on("call-start", () => {
+          console.log("🎬 VAPI call-start - clearing processed tool calls");
           processedToolCallsRef.current.clear();
           lastTranscriptRef.current = null;
           setIsListening(true);
@@ -466,6 +576,13 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
         });
 
         vapiInstance.on("message", async (message: any) => {
+          // Log ALL messages to understand VAPI format
+          console.log("📩 VAPI Message Event:", {
+            type: message.type,
+            keys: Object.keys(message),
+            message: message,
+          });
+
           // CRITICAL: Monitor for auto-end signals
           if (message.type === "call-end" || message.type === "end-call") {
             console.warn("🚨 UNEXPECTED CALL END DETECTED:", message);
@@ -538,57 +655,136 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
           }
 
           if (message.type === "function-call") {
+            console.log("📞 VAPI function-call event:", message);
             const potentialToolCallId = message.toolCallId || message.tool_call_id || message.id || message.toolCall?.id;
 
             // Check if already processed to avoid duplicates
             if (potentialToolCallId && processedToolCallsRef.current.has(potentialToolCallId)) {
+              console.log("⏭️ Skipping duplicate tool call:", potentialToolCallId);
               return;
             }
 
             const result = await handleFunctionCall(message.functionName, message.functionArgs);
+            console.log("📤 Tool call result:", result);
 
             if (potentialToolCallId) {
               processedToolCallsRef.current.add(potentialToolCallId);
+              console.log("📨 Sending tool result to VAPI:", {
+                toolCallId: potentialToolCallId,
+                functionName: message.functionName,
+                resultText: result?.result,
+              });
               sendToolResultToVapi(potentialToolCallId, message.functionName ?? "", {
                 success: Boolean(result?.success),
                 result: result?.result,
                 country: result?.country,
               });
             } else {
-              console.warn("🚨 No toolCallId found in function call message");
+              console.warn("🚨 No toolCallId found in function call message:", message);
             }
           }
 
           // Also check for tool-calls format (alternative format)
           if (message.type === "tool-calls" || message.toolCalls) {
+            console.log("🔧 TOOL-CALLS Event Detected (Server-side):", {
+              messageType: message.type,
+              messageKeys: Object.keys(message),
+            });
+
+            // Parse tool call to trigger globe highlighting
             const toolCalls = message.toolCalls || message.toolCallList || [];
+            for (const toolCall of toolCalls) {
+              const functionName = toolCall.function?.name || toolCall.name;
+              const rawArgs = toolCall.function?.arguments || toolCall.arguments;
+
+              if (functionName === "queryScamsByLocation" && rawArgs) {
+                const args = parseFunctionArgs(rawArgs);
+                const country = args.country;
+
+                if (country) {
+                  console.log("🌍 Triggering globe highlight for:", country);
+                  onLocationQuery(country);
+                }
+              }
+            }
+
+            // Server handles tool execution, client just highlights globe
+            return;
+
+            /* Client-side handling disabled - using server-side endpoint
+            const toolCalls = message.toolCalls || message.toolCallList || [];
+            console.log("🔧 Tool calls array:", toolCalls);
 
             // Use for...of to properly await async functions
             for (const toolCall of toolCalls) {
-              const functionName = toolCall.name || toolCall.function?.name;
-              const rawArgs = toolCall.arguments || toolCall.function?.arguments;
+              console.log("🔧 Processing individual tool call:", {
+                toolCall,
+                keys: Object.keys(toolCall),
+              });
+
+              // VAPI sends: { id, type: "function", function: { name, arguments } }
+              const functionName = toolCall.function?.name || toolCall.name;
+              const rawArgs = toolCall.function?.arguments || toolCall.arguments;
               const toolCallId = toolCall.id;
+
+              console.log("🔧 Extracted tool call details:", {
+                functionName,
+                rawArgs,
+                rawArgsType: typeof rawArgs,
+                toolCallId,
+              });
 
               // Check if already processed to avoid duplicates
               if (toolCallId && processedToolCallsRef.current.has(toolCallId)) {
+                console.log("⏭️ Skipping duplicate tool call:", toolCallId);
                 continue;
               }
 
               if (functionName && rawArgs && toolCallId) {
+                console.log("✅ All data present, processing tool call...");
                 processedToolCallsRef.current.add(toolCallId);
+                
+                console.log("📞 Calling handleFunctionCall:", { functionName, rawArgs });
                 const result = await handleFunctionCall(functionName, rawArgs);
+                console.log("📤 handleFunctionCall returned:", result);
 
-                // Forward the actual result from the handler so it works for all tools
-                // (Previously this always sent a "focused on" message which was only correct for location queries.)
+                // Send tool result in standard format
+                console.log("📨 Preparing to send tool result to VAPI...");
                 sendToolResultToVapi(toolCallId, functionName, {
                   success: Boolean(result?.success),
                   result: (result as any)?.result,
                   country: (result as any)?.country,
                 });
+
+                // HACK: Also inject as assistant message to force AI to see it
+                if (vapiRef.current && (result as any)?.result) {
+                  console.log("💉 Injecting tool result as assistant message...");
+                  try {
+                    vapiRef.current.send({
+                      type: "add-message",
+                      message: {
+                        role: "assistant",
+                        content: `[SCAM DATA] ${(result as any).result}`,
+                      },
+                    } as any);
+                    console.log("✅ Injected successfully");
+                  } catch (err) {
+                    console.error("❌ Failed to inject:", err);
+                  }
+                }
               } else {
-                console.warn("🚨 Incomplete tool call data:", { functionName, rawArgs, toolCallId });
+                console.warn("🚨 Incomplete tool call data:", { 
+                  functionName, 
+                  rawArgs, 
+                  toolCallId,
+                  hasFunction: !!functionName,
+                  hasArgs: !!rawArgs,
+                  hasId: !!toolCallId,
+                  toolCallObject: toolCall,
+                });
               }
             }
+            */
           }
         });
 
@@ -669,7 +865,7 @@ const VoiceAssistantIntegrated = forwardRef<VoiceAssistantHandle, VoiceAssistant
         try {
           const locationData = getLocationScamData();
           const highRiskLocations = getHighRiskLocations();
-          // Temporarily disable assistant ID to use improved inline config
+          // Use dashboard assistant if configured, otherwise inline config
           const assistantId = PUBLIC_VAPI_ASSISTANT_ID;
 
           if (assistantId) {
@@ -720,12 +916,20 @@ Conversation flow:
 TOOL USAGE RULES:
 - ALWAYS call queryScamsByLocation when user mentions any location
 - Use specific country names (e.g., "United States" not "America", "United Kingdom" not "England")
-- After the tool call, DO NOT say "let me focus the map" or "I couldn't update" - just provide scam information directly
-- The tool focuses the globe automatically - you don't need to explain this to the user
-- NEVER end the conversation after a tool call - always follow up with relevant information
-- Examples of natural responses after tool calls:
-  * User: "America" → Call tool → You: "The United States has MEDIUM risk level with common taxi and online scams. Keep your valuables secure in major cities. Would you like to know about another destination?"
-  * User: "Thailand" → Call tool → You: "Thailand shows HIGH risk with taxi scams and fake police checkpoints reported. Always use metered taxis and ask for police ID. What other location interests you?"
+- The tool returns scam information for the country in this format:
+  * With data: "{Country}: {RISK LEVEL}, X scam reports. Types: {list}. Warnings: {list}. Tips: {list}"
+  * No data: "{Country}: No specific scam data available. Stay vigilant - common scams include..."
+- READ the tool result and share the information naturally in 2-3 sentences
+- If you see a risk level (HIGH/MEDIUM/LOW) and scam types, SHARE them with the traveler
+- If you see "No specific scam data", acknowledge it and share the generic safety tips provided
+- DO NOT say "I pulled the view", "let me focus", "I tried", or "I checked" - just share the scam information directly
+- NEVER mention technical details - talk like a knowledgeable travel expert
+- ALWAYS end with a question to continue: "What other destination interests you?" or "Where else are you headed?"
+- Examples:
+  * Tool: "Singapore: HIGH RISK, 4 scam reports. Types: dynamic pricing, fake sold-out. Warnings: Price differences in incognito mode. Tips: Check prices in incognito mode."
+    → You: "Singapore has high risk with 4 scam reports - watch for dynamic pricing and fake sold-out messages. Always check prices in incognito mode before booking. What other place would you like to know about?"
+  * Tool: "Italy: No specific scam data available. Stay vigilant - common scams include fake tickets..."
+    → You: "I don't have Italy-specific data yet, but stay alert for common scams like fake tickets and bogus rentals. Use official platforms. Where else are you going?"
 
 CRITICAL CONVERSATION CONTINUITY RULES:
 - THIS IS A CONTINUOUS CONVERSATION - NEVER END THE CALL AUTOMATICALLY
@@ -738,35 +942,14 @@ CRITICAL CONVERSATION CONTINUITY RULES:
 - If user asks about multiple countries, handle each one and keep going
 - Only end the conversation if the user explicitly says goodbye or wants to stop
 
-CONVERSATION FLOW AFTER TOOL CALLS:
-1. Call queryScamsByLocation tool (automatically focuses globe)
-2. Immediately provide: risk level + common scam types + 1-2 prevention tips
-3. Always end with: "Would you like to know about another destination?" or "What other places are you considering?"
-4. Never mention map/globe updates - focus only on safety information
-5. WAIT for user response - DO NOT end conversation
-6. Continue this pattern indefinitely until user wants to stop
+CRITICAL - HOW TO USE TOOL RESULTS:
+After calling queryScamsByLocation, the tool will return text like:
+"Singapore: HIGH RISK, 4 scam reports. Types: dynamic pricing, fake sold-out. Warnings: Price differences. Tips: Check in incognito."
 
-Risk guidance:
-- HIGH RISK → stress vigilance.
-- MEDIUM RISK → advise staying alert in known trouble spots.
-- LOW RISK → reassure but still offer a quick tip.
+YOU MUST READ THIS TEXT AND SHARE THE INFORMATION.
+Example: "Singapore has high risk with 4 scam reports. Watch for dynamic pricing and fake sold-out messages. Always check prices in incognito mode. What other place interests you?"
 
-Error handling:
-- Ask for clarification when the destination is unclear.
-- If data is unavailable or something fails, apologize and give best-effort safety advice instead of guessing.
-- Always keep the conversation going with follow-up questions
-
-Your goal: Help ${travelerFallbackName} stay safe using the data above. This is an ongoing conversation that should continue until the user explicitly wants to end it.
-
-CONVERSATION FLOW AFTER TOOL CALLS:
-1. Call queryScamsByLocation tool (automatically focuses globe).
-2. Immediately provide: risk level + common scam types + 1-2 prevention tips for the location.
-3. After providing the tips, ask the user if they would like a more detailed list of prevention tips sent to their email. For example: "I can also send a more detailed list of prevention tips for [Country] to your email. Would you like me to do that?"
-4. If they say yes, call the 'sendPreventionTipsEmail' function with the correct country. After the tool call, confirm with a message like "Alright, I've sent that to you."
-5. After handling the email request (or if they say no), ALWAYS ask if they want to know about another destination to continue the conversation. For example: "What other places are you considering?"
-6. Never mention map/globe updates - focus only on safety information.
-7. WAIT for user response - DO NOT end conversation.
-8. Continue this pattern indefinitely until user wants to stop.`,
+DO NOT say "I don't have data" if the tool gave you risk level and scam types - SHARE THEM!`,
                   },
                 ],
                 tools: [
@@ -774,14 +957,22 @@ CONVERSATION FLOW AFTER TOOL CALLS:
                     type: "function",
                     function: {
                       name: "queryScamsByLocation",
-                      description: "Focus the globe on the country or city the traveler asks about and get scam information.",
+                      description:
+                        "Get travel scam information for a specific country. ALWAYS use this when user mentions a location.",
                       parameters: {
                         type: "object",
                         properties: {
-                          country: { type: "string", description: "Country name to focus on and get scam data for" },
+                          country: {
+                            type: "string",
+                            description: "The country name (e.g., 'Singapore', 'United States', 'Thailand')",
+                          },
                         },
                         required: ["country"],
                       },
+                    },
+                    server: {
+                      url: "https://api.dev.rokimiftah.id/vapi/tool-call",
+                      timeoutSeconds: 20,
                     },
                   },
                   {
