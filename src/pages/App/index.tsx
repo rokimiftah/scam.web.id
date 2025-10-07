@@ -320,8 +320,10 @@ export default function App() {
 
     console.log("📡 Query Status:", {
       isAuthenticated,
-      scamStories: scamStories === undefined ? "⏳ loading" : scamStories === null ? "❌ null" : `✅ ${scamStories?.length} items`,
-      locationStats: locationStats === undefined ? "⏳ loading" : locationStats === null ? "❌ null" : `✅ ${locationStats?.length} items`,
+      scamStories:
+        scamStories === undefined ? "⏳ loading" : scamStories === null ? "❌ null" : `✅ ${scamStories?.length} items`,
+      locationStats:
+        locationStats === undefined ? "⏳ loading" : locationStats === null ? "❌ null" : `✅ ${locationStats?.length} items`,
       totalCount: totalScamCount === undefined ? "⏳ loading" : totalScamCount === null ? "❌ null" : `✅ ${totalScamCount}`,
     });
 
@@ -1835,7 +1837,7 @@ export default function App() {
                 <p className="animate-pulse text-lg font-light tracking-widest text-white/90 uppercase">Loading Data</p>
               </div>
             )}
-            
+
             {/* Globe Container - Adjusted to not overlap status bar */}
             <div className="absolute inset-0" style={{ backgroundColor: "#15151a" }}>
               <div ref={globeContainerRef} className="h-full w-full" style={{ backgroundColor: "#15151a" }}>
