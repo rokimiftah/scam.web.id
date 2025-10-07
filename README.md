@@ -21,6 +21,7 @@ Travel Scam Alert serves as a public service to help prevent financial loss and 
 ### ✅ Currently Implemented
 
 #### 🌐 Visualization & Interface
+
 - **3D Interactive Globe**: Real-time scam visualization using `react-globe.gl` with Three.js
 - **Risk-based Color Coding**: Visual indicators (green/amber/red) based on scam frequency
 - **Country Highlighting**: Click-to-focus on specific countries with detailed scam data
@@ -28,6 +29,7 @@ Travel Scam Alert serves as a public service to help prevent financial loss and 
 - **Dark Theme**: Eye-friendly UI optimized for extended usage
 
 #### 🎤 Voice Assistant (VAPI Integration)
+
 - **Natural Language Queries**: Ask about scams in any country using voice
 - **Real-time Data Retrieval**: Server-side tool calls for accurate scam information
 - **Smart Country Mapping**: Handles country aliases (e.g., "Turkey" → "Türkiye")
@@ -35,6 +37,7 @@ Travel Scam Alert serves as a public service to help prevent financial loss and 
 - **Processing Feedback**: Loading indicators during data fetching
 
 #### 🤖 AI-Powered Analysis
+
 - **Scam Categorization**: Automatic classification (accommodation, fake tickets, romance, etc.)
 - **Warning Signal Detection**: Pattern recognition for common scam indicators
 - **Prevention Tips Generation**: Context-aware safety recommendations
@@ -42,12 +45,14 @@ Travel Scam Alert serves as a public service to help prevent financial loss and 
 - **Risk Assessment**: Automated risk level calculation based on report frequency
 
 #### 🔐 Authentication & User Management
+
 - **OAuth Integration**: Google and GitHub login via Convex Auth
 - **User Profiles**: Avatar upload, name management, and preferences
 - **Session Management**: Secure token-based authentication
 - **Profile Editing**: Real-time profile updates with validation
 
 #### 📊 Data Management
+
 - **Reddit Scraping**: Automated collection from travel and scam subreddits (`r/scams`, `r/travelscams`, `r/digitalnomad`, `r/solotravel`, `r/travel`)
 - **Firecrawl Integration**: Advanced web scraping with pagination support
 - **Convex Database**: Real-time NoSQL database with optimized indexes
@@ -55,6 +60,7 @@ Travel Scam Alert serves as a public service to help prevent financial loss and 
 - **Location Statistics**: Aggregated data by country and city
 
 #### 📧 Notifications & Communication
+
 - **Email Integration**: Resend API for transactional emails
 - **Prevention Tips Delivery**: Send country-specific safety tips via email
 - **Authentication Emails**: Magic link and verification emails
@@ -71,9 +77,9 @@ Travel Scam Alert serves as a public service to help prevent financial loss and 
 
 Before running this application, ensure you have:
 
-- **Node.js 18+** or **Bun** runtime
+- **Node.js 22+** or **Bun** runtime
 - **Convex** account and project ([dashboard.convex.dev](https://dashboard.convex.dev))
-- **Firecrawl API** key for web scraping ([firecrawl.com](https://firecrawl.com))
+- **Firecrawl API** key for web scraping ([firecrawl.com](https://firecrawl.dev))
 - **VAPI** account and API keys for voice assistant ([vapi.ai](https://vapi.ai))
 - **LLM API** access (OpenAI, Anthropic, or compatible)
 - **OAuth Credentials** (Google and/or GitHub)
@@ -320,7 +326,8 @@ await scrapeAction({ subreddit: "scams" });
 export default defineSchema({
   scamStories: defineTable({
     // ... fields
-  }).index("by_country", ["country"])
+  })
+    .index("by_country", ["country"])
     .index("by_processed", ["isProcessed"]),
 });
 ```
@@ -332,13 +339,7 @@ export default defineSchema({
 Edit `convex/reddit.ts` to add/remove subreddits:
 
 ```typescript
-const SUBREDDITS = [
-  "scams",
-  "travelscams",
-  "digitalnomad",
-  "solotravel",
-  "travel"
-];
+const SUBREDDITS = ["scams", "travelscams", "digitalnomad", "solotravel", "travel"];
 ```
 
 **AI Analysis:**
@@ -488,7 +489,7 @@ This project is built with and inspired by the open source community. Special th
 ## ⚠️ Disclaimer
 
 > **Important**: This platform aggregates and analyzes publicly available information to help prevent scams. While we strive for accuracy and comprehensiveness:
-> 
+>
 > - Information may be incomplete or outdated
 > - Always verify through official channels before taking action
 > - Use your judgment and common sense when traveling
