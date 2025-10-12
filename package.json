@@ -9,8 +9,8 @@
     "preview": "rsbuild preview",
     "typecheck": "tsc --noEmit",
     "lint:biome": "biome check .",
-    "format:biome": "biome format --write .",
-    "lint": "npm run lint:biome && npm run typecheck"
+    "format:prettier": "prettier --write .",
+    "format:lint": "npm run format:prettier && npm run typecheck && npm run lint:biome"
   },
   "dependencies": {
     "@auth/core": "^0.40.0",

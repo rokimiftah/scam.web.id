@@ -1,4 +1,5 @@
 // convex/geocoding.ts
+
 // Simple geocoding with Mapbox API v6
 
 import { v } from "convex/values";
