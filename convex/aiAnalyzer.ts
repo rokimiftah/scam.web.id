@@ -1406,57 +1406,9 @@ export const cleanTranscript = action({
     transcript: v.string(),
   },
   handler: async (_ctx, args) => {
+    // Disabled: return input unchanged without calling external LLM
     const { transcript } = args;
-
-    if (!transcript || transcript.trim().length === 0) {
-      return { cleaned: transcript };
-    }
-
-    try {
-      const response = await fetch(LLM_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${LLM_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: LLM_API_MODEL,
-          messages: [
-            {
-              role: "system",
-              content: `You are a transcript cleaner. Your job is to remove duplicate words, phrases, and sentences while preserving the original meaning and natural flow of speech. 
-
-Rules:
-1. Remove consecutive duplicate words/phrases (e.g., "Got it, Rokey. Got it, Rokey." → "Got it, Rokey.")
-2. Remove overlapping content (e.g., "Welcome to Travel. Welcome to Travel Scam Alert" → "Welcome to Travel Scam Alert")
-3. Preserve stuttering or repeated words that are natural (e.g., "Um um, I think..." → "Um, I think...")
-4. Keep the same tone and style
-5. Return ONLY the cleaned text, no explanations
-6. If there are no duplicates, return the original text unchanged`,
-            },
-            {
-              role: "user",
-              content: transcript,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 500,
-        }),
-      });
-
-      if (!response.ok) {
-        console.error("LLM API error:", response.statusText);
-        return { cleaned: transcript };
-      }
-
-      const data = await response.json();
-      const cleaned = data.choices?.[0]?.message?.content?.trim() || transcript;
-
-      return { cleaned };
-    } catch (error) {
-      console.error("Error cleaning transcript with LLM:", error);
-      return { cleaned: transcript };
-    }
+    return { cleaned: transcript };
   },
 });
 
