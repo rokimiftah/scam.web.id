@@ -270,7 +270,7 @@ export const getTrendingScams = query({
 
     const stories = await ctx.db
       .query("scamStories")
-      .filter((q) => q.and(q.eq(q.field("isProcessed"), true), q.gte(q.field("postDate"), cutoffTime)))
+      .withIndex("by_processed_postDate", (q) => q.eq("isProcessed", true).gte("postDate", cutoffTime))
       .order("desc")
       .take(limit);
 

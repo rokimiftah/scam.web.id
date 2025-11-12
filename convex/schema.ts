@@ -110,6 +110,8 @@ export default defineSchema({
     .index("by_date", ["postDate"])
     .index("by_verification", ["verificationStatus"])
     .index("by_processed", ["isProcessed"])
+    // Composite index to efficiently query processed stories by recent postDate ranges
+    .index("by_processed_postDate", ["isProcessed", "postDate"])
     .searchIndex("search_stories", {
       searchField: "fullStory",
       filterFields: ["country", "scamType", "verificationStatus"],
