@@ -4,7 +4,6 @@
 
 import type { MutationCtx } from "./_generated/server";
 
-import GitHub from "@auth/core/providers/github";
 import Google from "@auth/core/providers/google";
 import { convexAuth } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
@@ -15,38 +14,6 @@ import { ResendMagicLink } from "./resend/ResendMagicLink";
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
   providers: [
     ResendMagicLink,
-    GitHub({
-      allowDangerousEmailAccountLinking: true,
-      profile: (params) => {
-        if (typeof params.email !== "string") {
-          throw new ConvexError("Email is required");
-        }
-        if (typeof params.id !== "string" && typeof params.id !== "number") {
-          throw new ConvexError("GitHub user ID is required");
-        }
-        const normalizedEmail = params.email.toLowerCase().trim();
-        const { error, data } = z
-          .object({
-            email: z.email("Invalid email address"),
-          })
-          .safeParse({ email: normalizedEmail });
-        if (error) throw new ConvexError(error.issues[0].message);
-
-        const raw: any = params;
-        const image: string | undefined =
-          typeof raw.avatar_url === "string" ? raw.avatar_url : typeof raw.picture === "string" ? raw.picture : undefined;
-
-        const name: string | undefined =
-          typeof raw.name === "string" && raw.name.trim() ? raw.name : typeof raw.login === "string" ? raw.login : undefined;
-
-        return {
-          id: String(params.id),
-          email: data.email,
-          ...(image ? { image } : {}),
-          ...(name ? { name } : {}),
-        };
-      },
-    }),
     Google({
       allowDangerousEmailAccountLinking: true,
       profile: (params) => {
