@@ -9,7 +9,7 @@ import type { GlobeMethods } from "react-globe.gl";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import isEmail from "validator/lib/isEmail";
 
@@ -279,11 +279,48 @@ if (typeof document !== "undefined" && !document.getElementById("scam-globe-styl
 }
 
 export default function App() {
-  // Authentication hooks
+  // Authentication hooks - useConvexAuth provides immediate auth state from session
+  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const { signIn } = useAuthActions();
-  const user = useQuery(api.users.getCurrentUser);
-  const isAuthenticated = !!user;
-  const isAuthLoading = user === undefined; // Query is still loading
+
+  // Track if we've ever been authenticated to prevent flash of login form
+  // This handles the delay between isAuthLoading becoming false and isAuthenticated becoming true
+  const [hasBeenAuthenticated, setHasBeenAuthenticated] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+
+  // Update hasBeenAuthenticated when user becomes authenticated
+  // Reset when user signs out
+  useEffect(() => {
+    if (isAuthenticated) {
+      setHasBeenAuthenticated(true);
+    } else if (initialLoadComplete && !isAuthLoading) {
+      // User signed out - reset the flag
+      setHasBeenAuthenticated(false);
+    }
+  }, [isAuthenticated, initialLoadComplete, isAuthLoading]);
+
+  // Mark initial load complete after auth settles
+  // Wait longer (3s) to account for token validation delay after OAuth redirect
+  useEffect(() => {
+    if (!isAuthLoading) {
+      // If already authenticated, complete immediately
+      if (isAuthenticated) {
+        setInitialLoadComplete(true);
+        return;
+      }
+      // Otherwise wait for auth to potentially settle (covers OAuth redirect delay)
+      const timer = setTimeout(() => {
+        setInitialLoadComplete(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthLoading, isAuthenticated]);
+
+  // Computed auth state - show loading until initial load is truly complete
+  const showLoading = isAuthLoading || (!initialLoadComplete && !isAuthenticated);
+  // Use hasBeenAuthenticated only during initial load to prevent flash
+  // After initial load complete, follow actual isAuthenticated state (handles signout properly)
+  const showAuthenticated = initialLoadComplete ? isAuthenticated : isAuthenticated || hasBeenAuthenticated;
 
   // Component state - declare selectedStoryId first
   const [selectedStoryId, setSelectedStoryId] = useState<Id<"scamStories"> | null>(null);
@@ -302,41 +339,23 @@ export default function App() {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const countryColorMapRef = useRef<Record<string, string>>({});
 
-  // Fetch real scam data from Convex - ALWAYS load (let backend handle auth)
-  // This ensures queries start immediately instead of waiting for user auth
-  const scamStories = useQuery(api.scams.getScamStoriesForGlobe);
-  const locationStats = useQuery(api.scams.getAllLocationStats);
-  const totalScamCount = useQuery(api.scams.getTotalScamCount);
+  // Fetch real scam data from Convex - only when authenticated
+  const scamStories = useQuery(api.scams.getScamStoriesForGlobe, isAuthenticated ? undefined : "skip");
+  const locationStats = useQuery(api.scams.getAllLocationStats, isAuthenticated ? undefined : "skip");
+  const totalScamCount = useQuery(api.scams.getTotalScamCount, isAuthenticated ? undefined : "skip");
   const selectedStoryDetails = useQuery(api.scams.getScamStory, selectedStoryId ? { storyId: selectedStoryId } : "skip");
 
   // Track if data has loaded at least once
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Debug queries and track loading
+  // Track data loading state
   useEffect(() => {
     const storiesLoaded = scamStories !== undefined && scamStories !== null;
     const statsLoaded = locationStats !== undefined && locationStats !== null;
     const countLoaded = totalScamCount !== undefined && totalScamCount !== null;
 
-    console.log("📡 Query Status:", {
-      isAuthenticated,
-      scamStories:
-        scamStories === undefined ? "⏳ loading" : scamStories === null ? "❌ null" : `✅ ${scamStories?.length} items`,
-      locationStats:
-        locationStats === undefined ? "⏳ loading" : locationStats === null ? "❌ null" : `✅ ${locationStats?.length} items`,
-      totalCount: totalScamCount === undefined ? "⏳ loading" : totalScamCount === null ? "❌ null" : `✅ ${totalScamCount}`,
-    });
-
     if (storiesLoaded && statsLoaded && countLoaded && !dataLoaded) {
-      console.log("✅ All data loaded successfully!");
       setDataLoaded(true);
-    }
-
-    if (scamStories === null) {
-      console.error("❌ scamStories query returned null - possible permission error");
-    }
-    if (locationStats === null) {
-      console.error("❌ locationStats query returned null - possible permission error");
     }
   }, [isAuthenticated, scamStories, locationStats, totalScamCount, dataLoaded]);
 
@@ -409,33 +428,17 @@ export default function App() {
   const { points, highRiskCount, totalReportsFromVisualization } = useMemo(() => {
     // Return empty if data still loading OR not authenticated
     if (scamStories === undefined || locationStats === undefined) {
-      console.log("⏳ Data still loading:", {
-        scamStories: scamStories === undefined ? "loading..." : `${scamStories?.length} items`,
-        locationStats: locationStats === undefined ? "loading..." : `${locationStats?.length} items`,
-      });
       return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
     }
 
     // If user not authenticated, return empty (backend will return empty arrays)
     if (!isAuthenticated) {
-      console.log("⚠️ Not authenticated, using empty data");
       return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
     }
 
     if (!scamStories || !locationStats) {
-      console.log("⚠️ Points empty because data is null:", {
-        hasScamStories: !!scamStories,
-        scamStoriesCount: scamStories?.length,
-        hasLocationStats: !!locationStats,
-        locationStatsCount: locationStats?.length,
-      });
       return { points: [], highRiskCount: 0, totalReportsFromVisualization: 0 };
     }
-
-    console.log("✅ Processing points with data:", {
-      storiesCount: scamStories.length,
-      statsCount: locationStats.length,
-    });
 
     // Create points for visualization (only for stories with coordinates)
     // Group stories by COUNTRY, not exact coordinates
@@ -645,14 +648,12 @@ export default function App() {
   const pointsRef = useRef(points);
   useEffect(() => {
     pointsRef.current = points;
-    console.log("📍 Points updated in ref:", points.length);
   }, [points]);
 
   // Memoized callback for location query to avoid stale closure
   const handleLocationQuery = useCallback(
     (country: string) => {
       const currentPoints = pointsRef.current;
-      console.log("🔍 handleLocationQuery called with:", country, "Points count:", currentPoints.length);
 
       // KEY = what database has, VALUES = what user might say
       const countryAliases: Record<string, string[]> = {
@@ -776,13 +777,6 @@ export default function App() {
 
       const point = findCountryWithAliases(country);
 
-      console.log("🎯 VAPI Location Query:", {
-        requestedCountry: country,
-        foundPoint: point ? point.country : "NOT FOUND",
-        hasData: !!point,
-        reports: point?.reports,
-      });
-
       if (point && globeRef.current) {
         setSelected(point);
         setShowDetail(true);
@@ -796,12 +790,6 @@ export default function App() {
         }
 
         setVoiceHighlightedCountry(point.country);
-        console.log("🔵 Highlighting country:", point.country);
-        console.log("🗺️ GeoJSON mapping check:", {
-          dbCountry: point.country,
-          geoJsonEquivalent:
-            Object.entries(geoJsonToDbCountryMap).find(([_geo, db]) => db === point.country)?.[0] || point.country,
-        });
 
         // Focus globe
         globeRef.current.pointOfView(
@@ -816,8 +804,6 @@ export default function App() {
         setShowDetail(false);
         setSelected(null);
         setVoiceHighlightedCountry(null);
-        console.warn("❌ App: Could not find point for country:", country);
-        console.warn("📊 App: Available countries:", currentPoints.map((p) => p.country).sort());
       }
     },
     [globeRef, setSelected, setShowDetail, setSelectedStoryId, setLastVapiCountry, setVoiceHighlightedCountry],
@@ -967,7 +953,7 @@ export default function App() {
                     <img src="/logo.png" alt="Travel Scam Alert" className="h-8 w-auto" />
                   </div>
 
-                  {!isAuthLoading && isAuthenticated ? (
+                  {!showLoading && showAuthenticated ? (
                     <>
                       {/* AI Assistant Button - Flex grow */}
                       {(() => {
@@ -1035,10 +1021,10 @@ export default function App() {
           {/* Content Area */}
           <div className="no-scrollbar relative flex flex-1 flex-col overflow-y-auto" style={{ backgroundColor: "transparent" }}>
             {/* Voice Assistant Interface - Only render if NOT loading */}
-            {!isAuthLoading && (
+            {!showLoading && (
               <VoiceAssistantIntegrated
                 ref={voiceAssistantRef}
-                isAuthenticated={isAuthenticated}
+                isAuthenticated={showAuthenticated}
                 pointsData={points}
                 onLocationQuery={handleLocationQuery}
                 onVoiceSessionEnd={() => {
@@ -1118,7 +1104,7 @@ export default function App() {
               </div>
             )}
 
-            {isAuthLoading ? (
+            {showLoading ? (
               // Show loading state while checking authentication
               <div className="flex flex-1 items-center justify-center">
                 <div className="text-white/40">
@@ -1132,7 +1118,7 @@ export default function App() {
                   </svg>
                 </div>
               </div>
-            ) : !isAuthenticated ? (
+            ) : !showAuthenticated ? (
               <div className="flex flex-1 flex-col" style={{ backgroundColor: "transparent" }}>
                 {/* Sign-in Form - Centered */}
                 <div className="flex flex-1 items-center justify-center px-6 py-6" style={{ backgroundColor: "transparent" }}>
@@ -1693,7 +1679,9 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">Total Scams</p>
                   <p className="mt-1 text-xl font-extralight text-white/90">
-                    {isAuthLoading || totalScamCount === undefined ? (
+                    {!showAuthenticated ? (
+                      "--"
+                    ) : showLoading || totalScamCount === undefined ? (
                       <span className="loading-dots" style={{ color: "#60a5fa" }}>
                         <span></span>
                         <span></span>
@@ -1721,7 +1709,9 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">High Risk</p>
                   <p className="mt-1 text-xl font-extralight text-red-400">
-                    {isAuthLoading || !scamStories ? (
+                    {!showAuthenticated ? (
+                      "--"
+                    ) : showLoading || !scamStories ? (
                       <span className="loading-dots" style={{ color: "#f87171" }}>
                         <span></span>
                         <span></span>
@@ -1748,7 +1738,9 @@ export default function App() {
                 <div className="relative p-4 backdrop-blur-sm">
                   <p className="text-xs tracking-wider text-white/40 uppercase">Reports</p>
                   <p className="mt-1 text-xl font-extralight text-green-400">
-                    {isAuthLoading || !scamStories || !locationStats ? (
+                    {!showAuthenticated ? (
+                      "--"
+                    ) : showLoading || !scamStories || !locationStats ? (
                       <span className="loading-dots" style={{ color: "#4ade80" }}>
                         <span></span>
                         <span></span>
@@ -1772,7 +1764,7 @@ export default function App() {
             </div>
 
             {/* Filter Button - Only show when authenticated */}
-            {!isAuthLoading && isAuthenticated ? (
+            {!showLoading && showAuthenticated ? (
               <button
                 onClick={() => setRiskFilter(riskFilter === 0 ? 0.6 : 0)}
                 className="group relative w-full cursor-pointer overflow-hidden border-t border-white/5 p-3 text-sm text-white/70 transition-all hover:bg-white/5 hover:text-white"
@@ -1805,8 +1797,8 @@ export default function App() {
         {/* Right Column - Globe */}
         <div className="relative flex h-full w-2/3 flex-col" style={{ backgroundColor: "#15151a" }}>
           <section ref={heroRef} className="relative flex-1 overflow-hidden" style={{ backgroundColor: "#15151a" }}>
-            {/* Data Loading Overlay - Show when queries are loading */}
-            {(scamStories === undefined || locationStats === undefined || totalScamCount === undefined) && (
+            {/* Data Loading Overlay - Show only when authenticated and queries are loading */}
+            {showAuthenticated && (scamStories === undefined || locationStats === undefined || totalScamCount === undefined) && (
               <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md">
                 <p className="animate-pulse text-lg font-light tracking-widest text-white/90 uppercase">Loading Data</p>
               </div>
@@ -1856,22 +1848,8 @@ export default function App() {
                         const geoJsonName = d.properties?.NAME;
                         const dbCountryName = geoJsonToDbCountryMap[geoJsonName] || geoJsonName;
 
-                        // Debug logging for Türkiye specifically
-                        if (
-                          voiceHighlightedCountry === "Türkiye" &&
-                          (geoJsonName.includes("Turkey") || dbCountryName.includes("Türkiye"))
-                        ) {
-                          console.log("🔍 Turkey polygon check:", {
-                            geoJsonName,
-                            dbCountryName,
-                            voiceHighlightedCountry,
-                            match: dbCountryName === voiceHighlightedCountry,
-                          });
-                        }
-
                         // Highlight the voice-selected country
                         if (voiceHighlightedCountry && dbCountryName === voiceHighlightedCountry) {
-                          console.log("✅ HIGHLIGHTING polygon:", dbCountryName);
                           return "#3b82f6"; // Bright blue for highlighted country
                         }
 
@@ -2136,12 +2114,12 @@ export default function App() {
                 <span className="text-sm text-white/60">Data Stream</span>
                 <div className="flex items-center gap-2">
                   <div
-                    className={`h-2 w-2 rounded-full ${isAuthLoading ? "animate-pulse bg-yellow-500" : isAuthenticated ? "animate-pulse bg-green-500" : "bg-gray-500"}`}
+                    className={`h-2 w-2 rounded-full ${showLoading ? "animate-pulse bg-yellow-500" : showAuthenticated ? "animate-pulse bg-green-500" : "bg-gray-500"}`}
                   ></div>
                   <span
-                    className={`text-xs ${isAuthLoading ? "text-yellow-400" : isAuthenticated ? "text-green-400" : "text-gray-400"}`}
+                    className={`text-xs ${showLoading ? "text-yellow-400" : showAuthenticated ? "text-green-400" : "text-gray-400"}`}
                   >
-                    {isAuthLoading ? "Connecting..." : isAuthenticated ? "Online" : "Offline"}
+                    {showLoading ? "Connecting..." : showAuthenticated ? "Online" : "Offline"}
                   </span>
                 </div>
               </div>
@@ -2150,7 +2128,7 @@ export default function App() {
               <div className="flex flex-1 items-center justify-between p-3">
                 <span className="text-sm text-white/60">On Map</span>
                 <span className="font-mono text-xs text-white/80">
-                  {isAuthLoading ? "--" : isAuthenticated && filtered ? filtered.length : "--"}
+                  {showLoading ? "--" : showAuthenticated && filtered ? filtered.length : "--"}
                 </span>
               </div>
             </div>
